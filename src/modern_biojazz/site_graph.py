@@ -26,7 +26,7 @@ class Protein:
 @dataclass
 class Rule:
     name: str
-    rule_type: str  # binding | phosphorylation | inhibition
+    rule_type: str  # binding | unbinding | phosphorylation | dephosphorylation | inhibition
     reactants: List[str]
     products: List[str]
     rate: float

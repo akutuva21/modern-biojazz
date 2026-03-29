@@ -24,12 +24,15 @@ class GraphMutator:
             network.proteins[species_name] = Protein(name=species_name, sites=[])
 
     def _replace_species_token(self, token: str, old: str, new: str) -> str:
-        token = token.replace(f"{old}:", f"{new}:")
-        token = token.replace(f":{old}", f":{new}")
         if token == old:
             return new
         if token == f"{old}_P":
             return f"{new}_P"
+        if token == f"{old}_inh":
+            return f"{new}_inh"
+        if ":" in token:
+            parts = token.split(":")
+            return ":".join(new if p == old else p for p in parts)
         return token
 
     def _binding_is_compatible(self, network: ReactionNetwork, a: str, b: str) -> bool:
@@ -58,6 +61,8 @@ class GraphMutator:
 
     def remove_protein(self, network: ReactionNetwork, protein_name: str) -> None:
         if protein_name not in network.proteins:
+            return
+        if len(network.proteins) <= 1:
             return
         del network.proteins[protein_name]
         network.rules = [
@@ -126,6 +131,47 @@ class GraphMutator:
 
     def remove_rule(self, network: ReactionNetwork, rule_name: str) -> None:
         network.rules = [r for r in network.rules if r.name != rule_name]
+
+    def add_dephosphorylation_rule(
+        self, network: ReactionNetwork, phosphatase: str, substrate_phospho: str, rate: float = 0.15,
+    ) -> None:
+        """Add a reverse phosphorylation rule: phosphatase + substrate_P -> phosphatase + substrate."""
+        if phosphatase not in network.proteins or substrate_phospho not in network.proteins:
+            return
+        if not substrate_phospho.endswith("_P"):
+            return
+        substrate = substrate_phospho[:-2]
+        self._add_species_if_missing(network, substrate)
+        rname = f"dephos_{phosphatase}_{substrate}_{len(network.rules)+1}"
+        network.rules.append(
+            Rule(
+                name=rname,
+                rule_type="dephosphorylation",
+                reactants=[phosphatase, substrate_phospho],
+                products=[phosphatase, substrate],
+                rate=rate,
+            )
+        )
+
+    def add_unbinding_rule(self, network: ReactionNetwork, complex_name: str, rate: float = 0.3) -> None:
+        """Add a dissociation rule: A:B -> A + B."""
+        if complex_name not in network.proteins:
+            return
+        if ":" not in complex_name:
+            return
+        parts = complex_name.split(":")
+        for part in parts:
+            self._add_species_if_missing(network, part)
+        rname = f"unbind_{complex_name}_{len(network.rules)+1}"
+        network.rules.append(
+            Rule(
+                name=rname,
+                rule_type="unbinding",
+                reactants=[complex_name],
+                products=parts,
+                rate=rate,
+            )
+        )
 
     def modify_rate(self, network: ReactionNetwork, rule_name: str, multiplier: float) -> None:
         for r in network.rules:
@@ -233,16 +279,36 @@ class GraphMutator:
             self.duplicate_protein_with_rewiring(net, target)
 
         def random_remove_protein(net: ReactionNetwork) -> None:
-            if not net.proteins:
+            if len(net.proteins) <= 1:
                 return
             target = self.rng.choice(list(net.proteins.keys()))
             self.remove_protein(net, target)
+
+        def random_dephos(net: ReactionNetwork) -> None:
+            phospho_species = [name for name in net.proteins.keys() if name.endswith("_P")]
+            if not phospho_species:
+                return
+            substrate_p = self.rng.choice(phospho_species)
+            candidates = [n for n in net.proteins.keys() if n != substrate_p and not n.endswith("_P")]
+            if not candidates:
+                return
+            phosphatase = self.rng.choice(candidates)
+            self.add_dephosphorylation_rule(net, phosphatase, substrate_p)
+
+        def random_unbind(net: ReactionNetwork) -> None:
+            complexes = [name for name in net.proteins.keys() if ":" in name]
+            if not complexes:
+                return
+            target = self.rng.choice(complexes)
+            self.add_unbinding_rule(net, target)
 
         return {
             "add_site": MutationAction("add_site", random_add_site),
             "add_binding": MutationAction("add_binding", random_bind),
             "add_phosphorylation": MutationAction("add_phosphorylation", random_phos),
+            "add_dephosphorylation": MutationAction("add_dephosphorylation", random_dephos),
             "add_inhibition": MutationAction("add_inhibition", random_inhibit),
+            "add_unbinding": MutationAction("add_unbinding", random_unbind),
             "remove_rule": MutationAction("remove_rule", random_remove_rule),
             "modify_rate": MutationAction("modify_rate", random_modify_rate),
             "remove_site": MutationAction("remove_site", random_remove_site),

@@ -26,3 +26,15 @@ def test_graph_mutation_e2e(seed_network):
     assert "JAK1:STAT3" in network.proteins
     assert "STAT3_P" in network.proteins
     assert any(name.startswith("STAT3_dup") for name in network.proteins)
+
+    # Reverse reactions
+    mutator.add_dephosphorylation_rule(network, "JAK1", "STAT3_P")
+    mutator.add_unbinding_rule(network, "JAK1:STAT3")
+
+    assert any(r.rule_type == "dephosphorylation" for r in network.rules)
+    assert any(r.rule_type == "unbinding" for r in network.rules)
+
+    # Inhibition
+    mutator.add_inhibition_rule(network, "SOCS3", "JAK1")
+    assert "JAK1_inh" in network.proteins
+    assert any(r.rule_type == "inhibition" for r in network.rules)

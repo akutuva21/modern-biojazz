@@ -1,0 +1,35 @@
+begin model
+
+begin parameters
+  kp_1 0.07
+  kdp_2 0.035
+  kf_3 0.008
+  kr_3 0.1
+  ki_4 0.025
+end parameters
+
+begin molecule types
+  JAK1(b_STAT3)
+  STAT3(Y705~u~p,b_JAK1)
+  SOCS3(activity~active~inactive)
+end molecule types
+
+begin seed species
+  JAK1(b_STAT3) 1.0
+  STAT3(Y705~u,b_JAK1) 1.0
+  SOCS3(activity~active) 1.0
+end seed species
+
+begin reaction rules
+  r1: JAK1() + STAT3(Y705~u) -> JAK1() + STAT3(Y705~p) kp_1
+  r2: STAT3(Y705~p) + STAT3(Y705~p) -> STAT3(Y705~u) + STAT3(Y705~u) kdp_2
+  r3: JAK1(b_STAT3) + STAT3(b_JAK1) <-> JAK1(b_STAT3!1).STAT3(b_JAK1!1) kf_3, kr_3
+  r4: STAT3() + SOCS3(activity~active) -> STAT3() + SOCS3(activity~inactive) ki_4
+end reaction rules
+
+begin observables
+  Molecules STAT3_obs STAT3()
+  Molecules pSTAT3 STAT3(Y705~p)
+end observables
+
+end model

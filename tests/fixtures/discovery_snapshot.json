@@ -1,0 +1,42 @@
+{
+  "seed_genes": ["IL6", "STAT3", "SOCS3"],
+  "species": ["IL6", "IL6ST", "JAK1", "STAT3", "SOCS3"],
+  "interactions": [
+    {
+      "source_genesymbol": "JAK1",
+      "target_genesymbol": "STAT3",
+      "is_stimulation": 1,
+      "is_inhibition": 0,
+      "type": "post_translational"
+    },
+    {
+      "source_genesymbol": "SOCS3",
+      "target_genesymbol": "JAK1",
+      "is_stimulation": 0,
+      "is_inhibition": 1,
+      "type": "post_translational"
+    },
+    {
+      "source_genesymbol": "IL6",
+      "target_genesymbol": "IL6ST",
+      "is_stimulation": 1,
+      "is_inhibition": 0,
+      "type": "post_translational"
+    },
+    {
+      "source_genesymbol": "IL6ST",
+      "target_genesymbol": "JAK1",
+      "is_stimulation": 1,
+      "is_inhibition": 0,
+      "type": "post_translational"
+    },
+    {
+      "source_genesymbol": "STAT3",
+      "target_genesymbol": "SOCS3",
+      "is_stimulation": 1,
+      "is_inhibition": 0,
+      "type": "transcriptional"
+    }
+  ],
+  "source": "snapshot"
+}

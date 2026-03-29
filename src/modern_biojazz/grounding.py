@@ -26,10 +26,14 @@ class GroundingEngine:
 
     def _normalize_edge_type(self, edge_type: str) -> str:
         raw = edge_type.lower().strip()
+        if "dephosph" in raw:
+            return "dephosphorylation"
         if "phosph" in raw:
             return "phosphorylation"
         if "inhib" in raw:
             return "inhibition"
+        if "unbind" in raw or "dissoc" in raw:
+            return "unbinding"
         if "bind" in raw or "complex" in raw:
             return "binding"
         return raw

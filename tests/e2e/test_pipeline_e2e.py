@@ -44,15 +44,28 @@ def test_full_pipeline_e2e(seed_network, grounding_payload):
     assert result.grounding is not None
     assert result.grounding.candidates_considered >= 1
 
-    allowed = set(grounding_payload["abstract_types"].keys())
+    # Validate all tokens are within the grounding constraint vocabulary.
+    # The filter allows: base proteins, _P, _inh, _dupNNNN, colon-complexes.
+    allowed = set(grounding_payload["abstract_types"].keys()) | set(seed_network.proteins.keys())
+
+    def _base(tok: str) -> str:
+        if tok.endswith("_P"):
+            return tok[:-2]
+        if tok.endswith("_inh"):
+            return tok[:-4]
+        if "_dup" in tok:
+            return tok[: tok.index("_dup")]
+        return tok
+
+    def _ok(tok: str) -> bool:
+        if _base(tok) in allowed:
+            return True
+        if ":" in tok:
+            return all(_base(p) in allowed for p in tok.split(":"))
+        return False
+
     for rule in result.evolution.best_network.rules:
         for token in [*rule.reactants, *rule.products]:
-            if token in allowed:
-                continue
-            if token.endswith("_P") and token[:-2] in allowed:
-                continue
-            if token.endswith("_inh") and token[:-4] in allowed:
-                continue
-            if ":" in token and all(part in allowed for part in token.split(":")):
-                continue
-            raise AssertionError(f"Found token outside grounding constraints: {token}")
+            assert _ok(token), f"Found token outside grounding constraints: {token}"
+    for pname in result.evolution.best_network.proteins:
+        assert _ok(pname), f"Found protein name outside grounding constraints: {pname}"
