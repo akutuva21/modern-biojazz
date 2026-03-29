@@ -33,6 +33,7 @@ from .pathway_discovery import (
     save_discovery_snapshot,
 )
 from .pipeline import ModernBioJazzPipeline, PipelineConfig
+from .rate_optimizer import optimize_rates, DEConfig
 from .simulation import FitnessEvaluator, LocalCatalystEngine, SimulationBackend
 from .site_graph import ReactionNetwork
 
@@ -68,6 +69,11 @@ class E2EConfig:
     # Grounding
     do_grounding: bool = True
 
+    # Rate optimization (post-evolution)
+    optimize_rates: bool = False
+    rate_opt_max_eval: int = 500
+    rate_opt_pop_size: Optional[int] = None  # Default: 10 * n_rates
+
 
 @dataclass
 class E2EResult:
@@ -79,7 +85,9 @@ class E2EResult:
     baseline_score: float
     evolved_network: ReactionNetwork
     evolved_score: float
-    improvement: float  # evolved - baseline
+    optimized_network: Optional[ReactionNetwork] = None
+    optimized_score: Optional[float] = None
+    improvement: float = 0.0  # best - baseline
     grounding: Any = None
 
 
@@ -183,6 +191,32 @@ def run_e2e(
     evolved_network = pipeline_result.evolution.best_network
     evolved_score = pipeline_result.evolution.best_score
 
+    # ── Step 7: Rate optimization (optional) ─────────────────────────
+    optimized_network = None
+    optimized_score = None
+
+    if cfg.optimize_rates and evolved_network.rules:
+        def _objective(candidate: ReactionNetwork) -> float:
+            return evaluator.score(
+                backend=backend, network=candidate,
+                t_end=cfg.sim_t_end, dt=cfg.sim_dt,
+            )
+
+        de_result = optimize_rates(
+            network=evolved_network,
+            backend=backend,
+            objective=_objective,
+            config=DEConfig(
+                max_eval=cfg.rate_opt_max_eval,
+                pop_size=cfg.rate_opt_pop_size,
+                seed=cfg.random_seed + 1000,
+            ),
+        )
+        optimized_network = de_result.best_network
+        optimized_score = de_result.best_score
+
+    best_score = optimized_score if optimized_score is not None else evolved_score
+
     return E2EResult(
         discovery=discovery,
         assembly=assembly,
@@ -190,7 +224,9 @@ def run_e2e(
         baseline_score=baseline_score,
         evolved_network=evolved_network,
         evolved_score=evolved_score,
-        improvement=evolved_score - baseline_score,
+        optimized_network=optimized_network,
+        optimized_score=optimized_score,
+        improvement=best_score - baseline_score,
         grounding=pipeline_result.grounding,
     )
 
@@ -286,6 +322,10 @@ def print_e2e_summary(result: E2EResult) -> None:
           f"{len(result.baseline_network.rules)} rules, score={result.baseline_score:.4f}")
     print(f"Evolved:   {len(result.evolved_network.proteins)} proteins, "
           f"{len(result.evolved_network.rules)} rules, score={result.evolved_score:.4f}")
+    if result.optimized_network is not None and result.optimized_score is not None:
+        print(f"Optimized: {len(result.optimized_network.rules)} rules, "
+              f"score={result.optimized_score:.4f} "
+              f"(+{result.optimized_score - result.evolved_score:.4f} from rate tuning)")
     sign = "+" if result.improvement >= 0 else ""
     print(f"Delta:     {sign}{result.improvement:.4f}")
     if result.grounding:

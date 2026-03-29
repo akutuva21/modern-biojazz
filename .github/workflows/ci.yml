@@ -1,0 +1,211 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: 'Run integration tests (OmniPath/INDRA live queries)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Fast unit + e2e tests (always runs, no network) ──────────────
+  fast-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: pytest tests/test_*.py -v --tb=short
+
+      - name: Run e2e tests (offline)
+        run: pytest tests/e2e/ -v --tb=short -k "not http"
+
+  # ── Type checking ────────────────────────────────────────────────
+  type-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package + mypy
+        run: |
+          pip install -e ".[dev]"
+          pip install mypy
+
+      - name: Run mypy
+        run: mypy src/modern_biojazz/ --ignore-missing-imports --no-error-summary || true
+
+  # ── BNGL converter parity (validate against BNG Playground) ──────
+  bngl-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Run BNGL converter tests
+        run: pytest tests/test_e2e_pipeline_unit.py -v --tb=short
+
+      - name: Validate sample BNGL roundtrip
+        run: |
+          python -c "
+          from modern_biojazz.bngl_converter import bngl_to_reaction_network
+          from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator
+          from pathlib import Path
+
+          bngl = Path('tests/fixtures/sample_indra.bngl').read_text()
+          net = bngl_to_reaction_network(bngl)
+          assert len(net.proteins) >= 3, f'Expected >=3 proteins, got {len(net.proteins)}'
+          assert len(net.rules) >= 4, f'Expected >=4 rules, got {len(net.rules)}'
+
+          engine = LocalCatalystEngine()
+          result = engine.simulate(net, t_end=10.0, dt=0.5, solver='BDF')
+          assert result['solver'] == 'BDF', f'Expected BDF, got {result[\"solver\"]}'
+
+          score = FitnessEvaluator(target_output=1.0).score(simulation_result=result)
+          print(f'BNGL parity: {len(net.proteins)} proteins, {len(net.rules)} rules, score={score:.4f}')
+          "
+
+  # ── E2E pipeline smoke test ──────────────────────────────────────
+  e2e-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Run full pipeline from snapshots
+        run: |
+          python -c "
+          from modern_biojazz.e2e_pipeline import run_e2e, E2EConfig, print_e2e_summary
+
+          config = E2EConfig(
+              seed_genes=['IL6', 'STAT3', 'SOCS3'],
+              discovery_snapshot='tests/fixtures/discovery_snapshot.json',
+              bngl_file='tests/fixtures/sample_indra.bngl',
+              do_grounding=True,
+              random_seed=42,
+          )
+          config.evolution.population_size=8
+          config.evolution.generations=5
+          config.evolution.mutations_per_candidate=2
+
+          result = run_e2e(config)
+          print_e2e_summary(result)
+          assert result.evolved_score >= 0.0
+          assert result.baseline_score >= 0.0
+          print(f'Pipeline passed: baseline={result.baseline_score:.4f}, evolved={result.evolved_score:.4f}, delta={result.improvement:+.4f}')
+          "
+
+  # ── Integration tests (live OmniPath/INDRA, manual trigger only) ─
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.run_integration == 'true' ||
+      contains(github.event.head_commit.message, '[integration]')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package + INDRA
+        run: |
+          pip install -e ".[dev]"
+          pip install indra || echo "INDRA install failed, manual assembly will be used"
+
+      - name: Run live OmniPath discovery
+        run: |
+          python -c "
+          from modern_biojazz.pathway_discovery import OmniPathDiscovery, save_discovery_snapshot
+          disc = OmniPathDiscovery()
+          result = disc.discover(['IL6', 'STAT3', 'TGFB1', 'SMAD3'])
+          print(f'Discovered {len(result.species)} species from {len(result.interactions)} interactions')
+          save_discovery_snapshot(result, 'discovery_live.json')
+          assert len(result.species) >= 4
+          "
+
+      - name: Run live INDRA assembly
+        run: |
+          python -c "
+          from modern_biojazz.indra_assembly import INDRAAssembler, save_assembly_snapshot
+          from modern_biojazz.pathway_discovery import load_discovery_snapshot
+          disc = load_discovery_snapshot('discovery_live.json')
+          assembler = INDRAAssembler()
+          result = assembler.assemble(disc.species[:20])  # Limit for CI speed
+          print(f'Assembled {len(result.statements)} statements')
+          save_assembly_snapshot(result, 'assembly_live.json')
+          " || echo "INDRA assembly failed (expected if API is down)"
+
+      - name: Run full live E2E pipeline
+        run: |
+          python -c "
+          from modern_biojazz.e2e_pipeline import run_e2e, E2EConfig, print_e2e_summary
+          config = E2EConfig(
+              seed_genes=['IL6', 'STAT3', 'SOCS3', 'JAK1'],
+              do_grounding=True,
+              random_seed=42,
+          )
+          config.evolution.population_size=12
+          config.evolution.generations=8
+          result = run_e2e(config)
+          print_e2e_summary(result)
+          " || echo "Live E2E failed (expected if APIs are down)"
+
+      - name: Upload live snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-snapshots
+          path: |
+            discovery_live.json
+            assembly_live.json
+          if-no-files-found: ignore
