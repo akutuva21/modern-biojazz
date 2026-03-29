@@ -159,9 +159,9 @@ def _parse_seed_species(text: str) -> Dict[str, float]:
         # e.g., STAT3(Y705~u) 1.0
         parts = line.rsplit(None, 1)
         if len(parts) == 2:
-            mol_name = _bare_mol_name(parts[0])
+            species_name = _state_qualified_name(parts[0].strip())
             try:
-                concentrations[mol_name] = float(parts[1])
+                concentrations[species_name] = float(parts[1])
             except ValueError:
                 continue
     return concentrations
@@ -270,18 +270,67 @@ def _bare_mol_name(pattern: str) -> str:
 
 
 def _extract_mol_names(expr: str) -> List[str]:
-    """Extract molecule names from a BNGL expression like 'A(x) + B(y!1).C(z!1)'."""
-    # Split on + (free reactants) and . (complexed reactants)
+    """Extract state-qualified species names from a BNGL expression.
+
+    'JAK1(activity~active) + STAT3(Y705~u)' → ['JAK1__activity_active', 'STAT3__Y705_u']
+    'A(x!1).B(y!1)' → ['A:B'] (complex)
+    'STAT3()' → ['STAT3']
+    """
     tokens = re.split(r"\s*\+\s*", expr.strip())
     names: List[str] = []
     for tok in tokens:
-        # A complex like A(x!1).B(y!1) → ["A", "B"]
-        sub_mols = re.split(r"\.", tok)
-        for sub in sub_mols:
-            name = _bare_mol_name(sub)
+        tok = tok.strip()
+        if not tok:
+            continue
+        # Complex: A(x!1).B(y!1) → single complex species
+        sub_mols = re.split(r"(?<=[)])\.", tok)
+        if len(sub_mols) > 1:
+            parts = [_state_qualified_name(s) for s in sub_mols]
+            names.append(":".join(parts))
+        else:
+            name = _state_qualified_name(tok)
             if name and name not in ("0", "Trash"):
                 names.append(name)
     return names
+
+
+def _state_qualified_name(pattern: str) -> str:
+    """Convert 'STAT3(Y705~u)' to 'STAT3__Y705_u', 'JAK1()' to 'JAK1'.
+
+    Preserves state information so ODE has distinct variables per state.
+    Ignores bond markers (!N, !+, !?).
+    """
+    pattern = pattern.strip()
+    m = re.match(r"(\w+)\(([^)]*)\)", pattern)
+    if not m:
+        # Bare name or malformed
+        return re.match(r"(\w+)", pattern).group(1) if re.match(r"(\w+)", pattern) else ""
+
+    mol_name = m.group(1)
+    sites_str = m.group(2).strip()
+
+    if not sites_str:
+        return mol_name
+
+    # Extract state-bearing sites (ignore bonds for ODE species naming)
+    state_parts = []
+    for site_token in sites_str.split(","):
+        site_token = site_token.strip()
+        if not site_token:
+            continue
+        # Remove bond markers
+        site_token = re.sub(r"![^\s,)~]*", "", site_token).strip()
+        parts = site_token.split("~")
+        if len(parts) >= 2:
+            # Site with a specific state: Y705~u → Y705_u
+            sname = parts[0].strip()
+            sval = parts[1].strip()  # Take the first (current) state
+            if sname and sval:
+                state_parts.append(f"{sname}_{sval}")
+
+    if state_parts:
+        return f"{mol_name}__{'_'.join(sorted(state_parts))}"
+    return mol_name
 
 
 def _is_rate_token(tok: str, params: Dict[str, float]) -> bool:

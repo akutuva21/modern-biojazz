@@ -5,7 +5,7 @@ import json
 import os
 import random
 
-from .evolution import LLMEvolutionEngine, EvolutionConfig, DeterministicProposer
+from .evolution import LLMEvolutionEngine, EvolutionConfig, DeterministicProposer, RandomProposer
 from .grounding import GroundingEngine
 from .llm_proposer import OpenAICompatibleProposer, SafeActionFilterProposer
 from .mutation import GraphMutator
@@ -25,7 +25,7 @@ def main() -> None:
     parser.add_argument("--sim-solver", default="Rodas5P")
     parser.add_argument("--sim-backend", choices=["local", "http"], default="local")
     parser.add_argument("--sim-base-url", help="Base URL of Catalyst simulation service")
-    parser.add_argument("--llm-provider", choices=["deterministic", "openai_compatible"], default="deterministic")
+    parser.add_argument("--llm-provider", choices=["deterministic", "random", "openai_compatible"], default="random")
     parser.add_argument("--llm-base-url", help="Base URL for OpenAI-compatible API")
     parser.add_argument("--llm-model", default="gpt-4o-mini")
     parser.add_argument("--llm-api-key-env", default="OPENAI_API_KEY")
@@ -60,6 +60,8 @@ def main() -> None:
                 model=args.llm_model,
             )
         )
+    elif args.llm_provider == "random":
+        proposer = RandomProposer(random.Random(7))
     else:
         proposer = DeterministicProposer()
 

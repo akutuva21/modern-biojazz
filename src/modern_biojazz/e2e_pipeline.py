@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .bngl_converter import bngl_to_reaction_network
-from .evolution import DeterministicProposer, EvolutionConfig, LLMEvolutionEngine
+from .evolution import DeterministicProposer, RandomProposer, EvolutionConfig, EvolutionResult, LLMEvolutionEngine
 from .grounding import GroundingEngine
 from .indra_assembly import (
     AssemblyResult,
@@ -65,6 +65,7 @@ class E2EConfig:
     # Simulation
     sim_t_end: float = 30.0
     sim_dt: float = 0.5
+    output_species: Optional[str] = None  # Which species to track for fitness. Auto-detected if None.
 
     # Grounding
     do_grounding: bool = True
@@ -85,6 +86,7 @@ class E2EResult:
     baseline_score: float
     evolved_network: ReactionNetwork
     evolved_score: float
+    evolution: EvolutionResult
     optimized_network: Optional[ReactionNetwork] = None
     optimized_score: Optional[float] = None
     improvement: float = 0.0  # best - baseline
@@ -153,10 +155,19 @@ def run_e2e(
         save_assembly_snapshot(assembly, cfg.save_assembly_to)
 
     # ── Step 3: Parse BNGL → ReactionNetwork ─────────────────────────
-    baseline_network = bngl_to_reaction_network(
-        assembly.bngl_text,
-        metadata={"pathway": "auto", "source": assembly.source},
-    )
+    baseline_network = bngl_to_reaction_network(assembly.bngl_text)
+    baseline_network.metadata["pathway"] = "auto"
+    baseline_network.metadata["source"] = assembly.source
+
+    # Set output_species — user-specified, or auto-detect from BNGL observables,
+    # or pick the first state-qualified species with nontrivial dynamics.
+    if cfg.output_species:
+        baseline_network.metadata["output_species"] = cfg.output_species
+    elif "output_species" not in baseline_network.metadata:
+        # Pick a phosphorylated or activated species as the output target.
+        candidates = [name for name in baseline_network.proteins if "__" in name and ("_p" in name or "_active" in name or "_high" in name)]
+        if candidates:
+            baseline_network.metadata["output_species"] = sorted(candidates)[0]
 
     # ── Step 4: Score baseline ───────────────────────────────────────
     baseline_score = evaluator.score(
@@ -173,7 +184,7 @@ def run_e2e(
     engine = LLMEvolutionEngine(
         simulation_backend=backend,
         fitness_evaluator=evaluator,
-        proposer=DeterministicProposer(),
+        proposer=RandomProposer(random.Random(cfg.random_seed)),
         mutator=GraphMutator(rng),
         rng=rng,
     )
@@ -198,8 +209,10 @@ def run_e2e(
     if cfg.optimize_rates and evolved_network.rules:
         def _objective(candidate: ReactionNetwork) -> float:
             return evaluator.score(
-                backend=backend, network=candidate,
-                t_end=cfg.sim_t_end, dt=cfg.sim_dt,
+                backend=backend,
+                network=candidate,
+                t_end=cfg.sim_t_end,
+                dt=cfg.sim_dt,
             )
 
         de_result = optimize_rates(
@@ -224,6 +237,7 @@ def run_e2e(
         baseline_score=baseline_score,
         evolved_network=evolved_network,
         evolved_score=evolved_score,
+        evolution=pipeline_result.evolution,
         optimized_network=optimized_network,
         optimized_score=optimized_score,
         improvement=best_score - baseline_score,
@@ -334,3 +348,14 @@ def print_e2e_summary(result: E2EResult) -> None:
         if result.grounding.mapping:
             for abstract, real in sorted(result.grounding.mapping.items()):
                 print(f"  {abstract} → {real}")
+
+
+def print_evolution_summary(result: E2EResult) -> None:
+    print("Evolution generation details:")
+    for gen in result.evolution.generation_summary:
+        print(
+            f"gen {gen.generation}: best={gen.best_score:.4f}, "
+            f"proteins={gen.best_n_proteins}, rules={gen.best_n_rules}, "
+            f"unique_population={gen.unique_population}, "
+            f"top_scores={gen.top_scores}"
+        )

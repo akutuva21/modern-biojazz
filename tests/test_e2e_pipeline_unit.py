@@ -60,7 +60,8 @@ def test_bngl_converter_reads_seed_species(fixtures_dir: Path):
 
     ic = net.metadata.get("initial_concentrations", {})
     assert ic.get("JAK1", 0) == 1.0
-    assert ic.get("STAT3", 0) == 1.0
+    # STAT3 is represented in state-qualified form now.
+    assert ic.get("STAT3__Y705_u", 0) == 1.0
 
 
 def test_bngl_converter_roundtrip_to_simulation(fixtures_dir: Path):
@@ -158,3 +159,27 @@ def test_e2e_pipeline_fallback_when_offline():
     assert "fallback" in result.assembly.source
     assert result.baseline_score >= 0.0
     assert result.evolved_score >= 0.0
+
+
+def test_evolution_generation_summary_includes_top_scores():
+    config = E2EConfig(
+        seed_genes=["IL6", "STAT3", "SOCS3"],
+        discovery_snapshot="tests/fixtures/discovery_snapshot.json",
+        bngl_file="tests/fixtures/sample_indra.bngl",
+        evolution=E2EConfig().evolution,
+        do_grounding=False,
+        random_seed=42,
+    )
+    config.evolution.population_size = 4
+    config.evolution.generations = 2
+    config.evolution.mutations_per_candidate = 1
+
+    result = run_e2e(config)
+
+    assert len(result.evolution.history) == 3
+    assert len(result.evolution.generation_summary) == 3
+    assert result.evolution.generation_summary[0].best_score == result.evolution.history[0]
+    assert isinstance(result.evolution.generation_summary[0].top_scores, list)
+    assert isinstance(result.evolution.generation_summary[0].unique_population, int)
+    assert result.evolution.generation_summary[0].unique_population >= 1
+

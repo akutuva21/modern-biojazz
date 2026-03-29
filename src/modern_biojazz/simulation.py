@@ -100,10 +100,21 @@ class LocalCatalystEngine:
                     species_order.append(token)
 
         index = {name: i for i, name in enumerate(species_order)}
-        y0 = [1.0 for _ in species_order]
-        for i, name in enumerate(species_order):
-            if name not in network.proteins:
-                y0[i] = 0.0
+
+        # Default: proteins get 1.0, derived species get 0.0.
+        y0 = [1.0 if name in network.proteins else 0.0 for name in species_order]
+
+        # Apply initial concentrations from metadata (set by BNGL converter).
+        meta_ic = network.metadata.get("initial_concentrations", {})
+        if meta_ic:
+            for name, value in meta_ic.items():
+                if name not in index:
+                    species_order.append(name)
+                    index[name] = len(y0)
+                    y0.append(0.0)
+                y0[index[name]] = float(value)
+
+        # Explicit initial_conditions override everything.
         if initial_conditions:
             for name, value in initial_conditions.items():
                 if name not in index:

@@ -29,10 +29,21 @@ class EvolutionConfig:
 
 
 @dataclass
+class GenerationSummary:
+    generation: int
+    best_score: float
+    best_n_proteins: int
+    best_n_rules: int
+    top_scores: List[float]
+    unique_population: int
+
+
+@dataclass
 class EvolutionResult:
     best_network: ReactionNetwork
     best_score: float
     history: List[float]
+    generation_summary: List[GenerationSummary]
 
 
 class LLMEvolutionEngine:
@@ -135,6 +146,13 @@ class LLMEvolutionEngine:
             return last_child
         return network.copy()
 
+    def _network_fingerprint(self, network: ReactionNetwork) -> str:
+        proteins = sorted(network.proteins.keys())
+        rules = sorted(
+            [f"{r.rule_type}:{'+'.join(r.reactants)}->{'+'.join(r.products)}@{r.rate:.6g}" for r in network.rules]
+        )
+        return json.dumps({"proteins": proteins, "rules": rules}, sort_keys=True)
+
     def _evaluate(self, network: ReactionNetwork, config: EvolutionConfig) -> float:
         try:
             score = self.fitness.score(
@@ -178,6 +196,20 @@ class LLMEvolutionEngine:
         best_score, best_network = scored_initial[0]
         best = best_network.copy()
         history: List[float] = [best_score]
+        def calc_unique_population(island_pop: List[ReactionNetwork]) -> int:
+            fingerprints = set(self._network_fingerprint(n) for n in island_pop)
+            return len(fingerprints)
+
+        generation_summary: List[GenerationSummary] = [
+            GenerationSummary(
+                generation=0,
+                best_score=best_score,
+                best_n_proteins=len(best.proteins),
+                best_n_rules=len(best.rules),
+                top_scores=[s for s, _ in scored_initial[: min(5, len(scored_initial))]],
+                unique_population=sum(calc_unique_population(island) for island in islands),
+            )
+        ]
 
         for generation in range(config.generations):
             for island_idx, island_pop in enumerate(islands):
@@ -202,9 +234,28 @@ class LLMEvolutionEngine:
             if hasattr(self.proposer, "record_feedback"):
                 self.proposer.record_feedback(best_score, f"generation={generation+1}")
 
+            generation_summary.append(
+                GenerationSummary(
+                    generation=generation + 1,
+                    best_score=best_score,
+                    best_n_proteins=len(best.proteins),
+                    best_n_rules=len(best.rules),
+                    top_scores=[
+                        s for island in islands
+                        for s, _ in sorted([(self._evaluate(n, config), n) for n in island], key=lambda x: x[0], reverse=True)[:3]
+                    ][:5],
+                    unique_population=sum(calc_unique_population(island) for island in islands),
+                )
+            )
+
             history.append(best_score)
 
-        return EvolutionResult(best_network=best, best_score=best_score, history=history)
+        return EvolutionResult(
+            best_network=best,
+            best_score=best_score,
+            history=history,
+            generation_summary=generation_summary,
+        )
 
     def _migrate(self, islands: List[List[ReactionNetwork]], migration_count: int) -> None:
         migrants_by_island: List[List[ReactionNetwork]] = []
@@ -220,6 +271,23 @@ class LLMEvolutionEngine:
 
 
 @dataclass
+class RandomProposer:
+    """Simple random proposer to generate varied candidate actions."""
+
+    rng: random.Random | None = None
+
+    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
+        if not action_names:
+            return []
+        rng = self.rng or random.Random()
+        self.rng = rng
+        choices = list(action_names)
+        rng.shuffle(choices)
+        n = max(1, min(budget, len(choices)))
+        return choices[:n]
+
+
+@dataclass
 class DeterministicProposer:
     """Test-friendly proposer that cycles over available mutation actions."""
 
@@ -230,9 +298,9 @@ class DeterministicProposer:
         if not action_names:
             return []
         out: List[str] = []
-        for _ in range(max(1, budget)):
-            out.append(action_names[self.cursor % len(action_names)])
-            self.cursor += 1
+        for i in range(max(1, budget)):
+            out.append(action_names[(self.cursor + i) % len(action_names)])
+        self.cursor += max(1, budget)
         return out
 
     def record_feedback(self, score: float, notes: str) -> None:
