@@ -1,0 +1,28 @@
+{
+  "proteins": {
+    "STAT3": {
+      "name": "STAT3",
+      "sites": [
+        {"name": "Y705", "site_type": "modification"}
+      ]
+    },
+    "SOCS3": {
+      "name": "SOCS3",
+      "sites": [
+        {"name": "SH2", "site_type": "binding"}
+      ]
+    }
+  },
+  "rules": [
+    {
+      "name": "phos_seed",
+      "rule_type": "phosphorylation",
+      "reactants": ["STAT3", "SOCS3"],
+      "products": ["STAT3", "SOCS3_P"],
+      "rate": 0.2
+    }
+  ],
+  "metadata": {
+    "pathway": "IL6_TGFB"
+  }
+}

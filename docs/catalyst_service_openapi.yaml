@@ -1,0 +1,145 @@
+openapi: 3.0.3
+info:
+  title: Modern BioJazz Catalyst Service API
+  version: 0.1.0
+  description: HTTP contract for external Julia Catalyst simulation backend.
+servers:
+  - url: http://localhost:8000
+paths:
+  /simulate:
+    post:
+      summary: Simulate a reaction network
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationRequest'
+      responses:
+        '200':
+          description: Successful simulation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationResponse'
+        '400':
+          description: Invalid request payload
+        '500':
+          description: Internal simulation error
+components:
+  schemas:
+    Site:
+      type: object
+      required: [name, site_type]
+      properties:
+        name:
+          type: string
+        site_type:
+          type: string
+          enum: [binding, modification]
+        states:
+          type: array
+          items:
+            type: string
+        allowed_partners:
+          type: array
+          items:
+            type: string
+    Protein:
+      type: object
+      required: [name, sites]
+      properties:
+        name:
+          type: string
+        sites:
+          type: array
+          items:
+            $ref: '#/components/schemas/Site'
+    Rule:
+      type: object
+      required: [name, rule_type, reactants, products, rate]
+      properties:
+        name:
+          type: string
+        rule_type:
+          type: string
+        reactants:
+          type: array
+          items:
+            type: string
+        products:
+          type: array
+          items:
+            type: string
+        rate:
+          type: number
+          format: double
+    ReactionNetwork:
+      type: object
+      required: [proteins, rules, metadata]
+      properties:
+        proteins:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Protein'
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/Rule'
+        metadata:
+          type: object
+          additionalProperties: true
+    SimulationRequest:
+      type: object
+      required: [network, t_end, dt, solver]
+      properties:
+        network:
+          $ref: '#/components/schemas/ReactionNetwork'
+        t_end:
+          type: number
+          format: double
+        dt:
+          type: number
+          format: double
+        solver:
+          type: string
+        initial_conditions:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+    TrajectoryPoint:
+      type: object
+      required: [t, output, species]
+      properties:
+        t:
+          type: number
+          format: double
+        output:
+          type: number
+          format: double
+        species:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+    SimulationResponse:
+      type: object
+      required: [solver, trajectory, stats]
+      properties:
+        solver:
+          type: string
+        trajectory:
+          type: array
+          items:
+            $ref: '#/components/schemas/TrajectoryPoint'
+        stats:
+          type: object
+          required: [n_rules, n_species, stiff]
+          properties:
+            n_rules:
+              type: integer
+            n_species:
+              type: integer
+            stiff:
+              type: boolean
