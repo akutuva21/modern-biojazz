@@ -1,4 +1,4 @@
-from .site_graph import ReactionNetwork, Protein, Site, Rule, ReactionNetworkValidationError
+from .site_graph import ReactionNetwork as ReactionNetwork, Protein as Protein, Site as Site, Rule as Rule, ReactionNetworkValidationError as ReactionNetworkValidationError
 from .mutation import GraphMutator
 from .simulation import CatalystHTTPClient, LocalCatalystEngine, FitnessEvaluator, UltrasensitiveFitnessEvaluator, FitnessScorer
 from .evolution import EvolutionConfig, LLMEvolutionEngine, EvolutionResult
