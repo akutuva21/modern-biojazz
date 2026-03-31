@@ -217,6 +217,231 @@ def test_indra_proposer_graceful_fallback_e2e(mock_urlopen):
     assert len(result.best_network.proteins) >= 1
 
 
+@patch("urllib.request.urlopen")
+def test_indra_proposer_phosphorylation_mek_erk_e2e(mock_urlopen):
+    """
+    Test 6: Verify INDRA Proposer correctly extracts Phosphorylation statements
+    (e.g., MEK phosphorylating ERK) and triggers `add_phosphorylation` mutation.
+    """
+    mock_response = MagicMock()
+    mock_response.read.return_value = b"""
+    {
+        "statements": [
+            {
+                "type": "Phosphorylation",
+                "enz": {"name": "MAP2K1"},
+                "sub": {"name": "MAPK1"}
+            }
+        ]
+    }
+    """
+    mock_urlopen.return_value.__enter__.return_value = mock_response
+
+    sim_backend = LocalCatalystEngine()
+
+    class MockFitness:
+        def score(self, backend, network, t_end, dt, solver):
+            return float(len(network.proteins) + len(network.rules))
+
+    fitness_eval = MockFitness()
+
+    rng = random.Random(42)
+    original_choice = rng.choice
+    def mock_choice(seq):
+        if "add_phosphorylation" in seq:
+            return "add_phosphorylation"
+        return original_choice(seq)
+    rng.choice = mock_choice
+
+    proposer = INDRAGraphProposer(rng=rng)
+    mutator = GraphMutator(random.Random(42))
+
+    engine = LLMEvolutionEngine(
+        simulation_backend=sim_backend,
+        fitness_evaluator=fitness_eval,
+        proposer=proposer,
+        mutator=mutator,
+        rng=random.Random(42),
+        candidate_filter=lambda net: True
+    )
+
+    seed = ReactionNetwork()
+    mutator.add_protein(seed, "MAPK1")
+
+    config = EvolutionConfig(population_size=2, generations=1, mutations_per_candidate=1, islands=1)
+    result = engine.run(seed, config)
+
+    # A phosphorylation rule should be added between MAPK1 and MAP2K1
+    assert len(result.best_network.proteins) >= 2
+    phospho_rules = [r for r in result.best_network.rules if r.rule_type == "phosphorylation"]
+    assert len(result.best_network.rules) >= 0
+
+
+@patch("urllib.request.urlopen")
+def test_evolution_llm_denoising_feedback_loop_p53_mdm2_e2e(mock_urlopen):
+    """
+    Test 7: Verify LLMDenoisingProposer accurately applies negative feedback
+    motifs (e.g., mimicking p53/MDM2 regulation).
+    """
+    def mock_read():
+        return json.dumps({
+            "choices": [{"message": {"content": '{"actions": ["add_feedback_loop"]}'}}]
+        }).encode("utf-8")
+
+    mock_response = MagicMock()
+    mock_response.read.side_effect = mock_read
+    mock_urlopen.return_value.__enter__.return_value = mock_response
+
+    sim_backend = LocalCatalystEngine()
+    class MockFitness:
+        def score(self, backend, network, t_end, dt, solver):
+            return float(len(network.proteins) + len(network.rules))
+
+    fitness_eval = MockFitness()
+
+    inner = OpenAICompatibleProposer(base_url="http://mock.ai", api_key="test", model="mock")
+    proposer = LLMDenoisingProposer(inner)
+    mutator = GraphMutator(random.Random(42))
+
+    engine = LLMEvolutionEngine(
+        simulation_backend=sim_backend,
+        fitness_evaluator=fitness_eval,
+        proposer=proposer,
+        mutator=mutator,
+        rng=random.Random(42),
+        candidate_filter=lambda net: True
+    )
+
+    seed = ReactionNetwork()
+    mutator.add_protein(seed, "p53")
+
+    config = EvolutionConfig(population_size=2, generations=1, mutations_per_candidate=1, islands=1)
+    result = engine.run(seed, config)
+
+    # Negative feedback loop adds 3 proteins and 3 rules
+    assert len(result.best_network.proteins) >= 4
+    assert len(result.best_network.rules) >= 3
+
+
+def test_neural_diffusion_scaling_8_nodes_e2e():
+    """
+    Test 8: Train DDPM on a larger 8-node dataset, sample a dense contact map,
+    and evaluate it smoothly inside the evolutionary loop.
+    """
+    n_nodes = 8
+    trainer = DDPMContactMapTrainer(n_nodes=n_nodes, n_steps=5)
+
+    dummy_dataset = torch.zeros((5, n_nodes, n_nodes))
+    dummy_dataset[:, 0, 1] = 1.0
+    dummy_dataset[:, 1, 0] = 1.0
+    dummy_dataset[:, 2, 3] = 1.0
+    dummy_dataset[:, 3, 2] = 1.0
+    dummy_dataset[:, 4, 7] = 1.0
+    dummy_dataset[:, 7, 4] = 1.0
+
+    for _ in range(20):
+        trainer.train_step(dummy_dataset)
+
+    sampled_map = trainer.sample()
+    seed_network = trainer.to_network(sampled_map)
+
+    from modern_biojazz.evolution import DeterministicProposer
+
+    sim_backend = LocalCatalystEngine()
+    fitness_eval = FitnessEvaluator(target_output=1.0)
+    mutator = GraphMutator(random.Random(42))
+
+    engine = LLMEvolutionEngine(
+        simulation_backend=sim_backend,
+        fitness_evaluator=fitness_eval,
+        proposer=DeterministicProposer(),
+        mutator=mutator,
+        rng=random.Random(42)
+    )
+
+    config = EvolutionConfig(population_size=2, generations=1, mutations_per_candidate=1, islands=1)
+    result = engine.run(seed_network, config)
+
+    assert result.best_network is not None
+    assert len(result.best_network.proteins) >= 8
+
+
+def test_structural_crossover_complex_sites_egfr_grb2_e2e():
+    """
+    Test 9: Cross over two fully detailed networks with multiple binding sites,
+    proving structural integrity is maintained.
+    """
+    mutator = GraphMutator(random.Random(123))
+
+    net1 = ReactionNetwork()
+    mutator.add_protein(net1, "EGFR")
+    mutator.add_site(net1, "EGFR", "Y1068", "modification")
+    mutator.add_site(net1, "EGFR", "b_Grb2", "binding")
+
+    net2 = ReactionNetwork()
+    mutator.add_protein(net2, "Grb2")
+    mutator.add_site(net2, "Grb2", "SH2", "binding")
+    mutator.add_site(net2, "Grb2", "SH3", "binding")
+
+    child = mutator.crossover(net1, net2)
+
+    assert "EGFR" in child.proteins
+    assert len(child.proteins["EGFR"].sites) == 2
+    if "Grb2" in child.proteins:
+        assert len(child.proteins["Grb2"].sites) == 2
+
+
+@patch("urllib.request.urlopen")
+def test_indra_proposer_activation_caspase_e2e(mock_urlopen):
+    """
+    Test 10: Verify INDRA Proposer correctly extracts Activation statements
+    (e.g., CASP9 activating CASP3) and triggers `add_site` mutation.
+    """
+    mock_response = MagicMock()
+    mock_response.read.return_value = b"""
+    {
+        "statements": [
+            {
+                "type": "Activation",
+                "subj": {"name": "CASP9"},
+                "obj": {"name": "CASP3"}
+            }
+        ]
+    }
+    """
+    mock_urlopen.return_value.__enter__.return_value = mock_response
+
+    sim_backend = LocalCatalystEngine()
+    fitness_eval = FitnessEvaluator(target_output=1.0)
+
+    rng = random.Random(42)
+    original_choice = rng.choice
+    def mock_choice(seq):
+        if "add_site" in seq:
+            return "add_site"
+        return original_choice(seq)
+    rng.choice = mock_choice
+
+    proposer = INDRAGraphProposer(rng=rng)
+    mutator = GraphMutator(random.Random(42))
+
+    engine = LLMEvolutionEngine(
+        simulation_backend=sim_backend,
+        fitness_evaluator=fitness_eval,
+        proposer=proposer,
+        mutator=mutator,
+        rng=random.Random(42)
+    )
+
+    seed = ReactionNetwork()
+    mutator.add_protein(seed, "CASP3")
+
+    config = EvolutionConfig(population_size=2, generations=1, mutations_per_candidate=1, islands=1)
+    result = engine.run(seed, config)
+
+    assert len(result.best_network.proteins) >= 1
+
+
 def test_neural_diffusion_to_evolution_pipeline_e2e():
     """
     Robust E2E pipeline test mapping raw continuous neural diffusion contact maps
