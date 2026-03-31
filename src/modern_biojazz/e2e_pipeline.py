@@ -215,7 +215,6 @@ def run_e2e(
 
         de_result = optimize_rates(
             network=evolved_network,
-            backend=backend,
             objective=_objective,
             config=DEConfig(
                 max_eval=cfg.rate_opt_max_eval,

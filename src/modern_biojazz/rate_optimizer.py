@@ -5,13 +5,12 @@ Operates on log10-transformed rate constants to handle the wide dynamic
 range typical of biochemical systems (1e-6 to 1e3).
 
 Usage:
-    from modern_biojazz.rate_optimizer import optimize_rates
+    from modern_biojazz.rate_optimizer import optimize_rates, DEConfig
 
     result = optimize_rates(
         network=my_network,
-        backend=LocalCatalystEngine(),
-        evaluator=FitnessEvaluator(target_output=1.0),
-        max_eval=500,
+        objective=lambda net: evaluator.score(backend, net, t_end=20.0),
+        config=DEConfig(max_eval=500),
     )
     optimized_network = result.best_network
 """
@@ -22,7 +21,6 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from .simulation import SimulationBackend
 from .site_graph import ReactionNetwork
 
 
@@ -55,11 +53,8 @@ class DEResult:
 
 def optimize_rates(
     network: ReactionNetwork,
-    backend: SimulationBackend,
     objective: Callable[[ReactionNetwork], float],
     config: Optional[DEConfig] = None,
-    t_end: float = 20.0,
-    dt: float = 1.0,
 ) -> DEResult:
     """Optimize rate constants of a ReactionNetwork using Differential Evolution.
 
@@ -67,8 +62,6 @@ def optimize_rates(
     ----------
     network : ReactionNetwork
         The network whose rates will be optimized. Not mutated.
-    backend : SimulationBackend
-        Used by the objective function (if it needs simulation).
     objective : callable
         Takes a ReactionNetwork, returns a score to MAXIMIZE.
         Typically wraps a FitnessEvaluator.
