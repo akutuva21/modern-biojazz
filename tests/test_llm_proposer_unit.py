@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from modern_biojazz.llm_proposer import OpenAICompatibleProposer, SafeActionFilterProposer
+from modern_biojazz.llm_proposer import OpenAICompatibleProposer, SafeActionFilterProposer, LLMDenoisingProposer
+from unittest.mock import patch, MagicMock
+import json
 
 
 def test_parse_json_handles_markdown_fences():
@@ -34,3 +36,19 @@ def test_safe_filter_proposer_propagates_feedback():
     wrapper = SafeActionFilterProposer(inner)
     wrapper.record_feedback(0.9, "ok")
     assert inner.feedback == [(0.9, "ok")]
+
+
+@patch("urllib.request.urlopen")
+def test_llm_denoising_proposer(mock_urlopen):
+    # Mock the LLM response
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps({
+        "choices": [{"message": {"content": '{"actions": ["add_binding", "remove_rule"]}'}}]
+    }).encode("utf-8")
+    mock_urlopen.return_value.__enter__.return_value = mock_response
+
+    inner = OpenAICompatibleProposer(base_url="http://example", api_key="key", model="model")
+    denoiser = LLMDenoisingProposer(inner)
+
+    actions = denoiser.propose("n_proteins=2;rules=[];proteins=['A', 'B']", ["add_binding", "remove_rule"], 2)
+    assert actions == ["add_binding", "remove_rule"]

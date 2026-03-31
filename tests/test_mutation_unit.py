@@ -158,3 +158,49 @@ def test_modify_rate_clamps_to_bounds():
     network.rules[0].rate = 1e-5
     mutator.modify_rate(network, "r1", 0.001)
     assert network.rules[0].rate == 1e-6
+
+
+def test_add_kinase_cascade():
+    mutator = GraphMutator(random.Random(123))
+    net = ReactionNetwork()
+    mutator.add_kinase_cascade(net)
+
+    # 3 proteins + 2 intermediate phosphos
+    assert len(net.proteins) == 5
+    assert len(net.rules) == 2
+    assert net.rules[0].rule_type == "phosphorylation"
+    assert net.rules[1].rule_type == "phosphorylation"
+
+
+def test_add_negative_feedback_loop():
+    mutator = GraphMutator(random.Random(123))
+    net = ReactionNetwork()
+    mutator.add_negative_feedback_loop(net)
+
+    # 3 proteins + 2 intermediate phosphos + 1 inhibition state
+    assert len(net.proteins) == 6
+    assert len(net.rules) == 3
+    assert net.rules[-1].rule_type == "inhibition"
+
+
+def test_crossover():
+    mutator = GraphMutator(random.Random(123))
+
+    net1 = ReactionNetwork()
+    mutator.add_protein(net1, "A")
+    mutator.add_protein(net1, "B")
+    mutator.add_binding_rule(net1, "A", "B")
+
+    net2 = ReactionNetwork()
+    mutator.add_protein(net2, "X")
+    mutator.add_protein(net2, "Y")
+    mutator.add_negative_feedback_loop(net2)
+
+    child = mutator.crossover(net1, net2)
+
+    # Should contain some nodes from both
+    assert "A" in child.proteins
+    assert "B" in child.proteins
+
+    # Randomly copied nodes from net2
+    assert len(child.proteins) > 2
