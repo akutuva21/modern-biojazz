@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import urllib.request
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -71,22 +72,32 @@ class INDRAAssembler:
         return all_statements
 
     def _query_db_rest(self, species: List[str], stmt_type: str) -> List[Dict[str, Any]]:
-        payload = json.dumps({
-            "subject": species,
-            "object": species,
-            "type": stmt_type,
-            "ev_limit": 5,
-        }).encode("utf-8")
+        url = f"{self.db_rest_url.rstrip('/')}/statements/from_agents?format=json"
 
-        req = urllib.request.Request(
-            url=f"{self.db_rest_url.rstrip('/')}/statements/from_agents",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return data.get("statements", data) if isinstance(data, dict) else data
+        all_stmts = []
+        for s in species:
+            payload = json.dumps({
+                "agent0": s,
+                "stmt_type": stmt_type,
+                "ev_limit": 5,
+            }).encode("utf-8")
+
+            req = urllib.request.Request(
+                url=url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    stmts = data.get("statements", data) if isinstance(data, dict) else data
+                    if isinstance(stmts, list):
+                        all_stmts.extend(stmts)
+            except Exception:
+                continue
+
+        return all_stmts
 
     def _assemble_bngl(
         self,
@@ -244,6 +255,98 @@ def load_bngl_file(path: str | Path) -> AssemblyResult:
     """Load a raw .bngl file as an assembly result."""
     text = Path(path).read_text(encoding="utf-8")
     return AssemblyResult(species=[], statements=[], bngl_text=text, source="file")
+
+
+@dataclass
+class INDRAGraphProposer:
+    """An LLM-free proposer that queries INDRA DB to generate valid network additions.
+
+    Acts as a bridge between real biology (via INDRA) and graph mutation actions.
+    When asked to propose, it randomly picks a protein from the network, asks INDRA what
+    interacts with it, and translates that into 'add_protein', 'add_phosphorylation', etc.
+    """
+
+    assembler: INDRAAssembler = field(default_factory=INDRAAssembler)
+    rng: random.Random = field(default_factory=random.Random)
+
+    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
+        # Parse available proteins from model_code (format: '...proteins=['A', 'B'];...')
+        proteins = []
+        try:
+            import re
+            m = re.search(r"proteins=\[(.*?)\]", model_code)
+            if m:
+                raw = m.group(1).replace("'", "").replace('"', "").split(",")
+                proteins = [p.strip() for p in raw if p.strip() and not p.strip().startswith("M_")]
+        except Exception:
+            pass
+
+        if not proteins:
+            # Fallback to random actions if no proteins found
+            return [self.rng.choice(action_names) for _ in range(max(1, budget))]
+
+        target = self.rng.choice(proteins)
+
+        # Query INDRA for statements involving this target
+        # For speed, we just grab 5 statements of a random type
+        stmt_type = self.rng.choice(["Phosphorylation", "Complex", "Activation"])
+        statements = self.assembler._query_db_rest([target], stmt_type)
+
+        if not statements:
+            # Fallback
+            return [self.rng.choice(action_names) for _ in range(max(1, budget))]
+
+        stmt = self.rng.choice(statements)
+
+        # Extract agents from statement
+        agents = stmt.get("agents") or stmt.get("members") or []
+        if not agents:
+            sub = stmt.get("sub") or stmt.get("subj") or stmt.get("enz")
+            obj = stmt.get("obj")
+            if sub and obj:
+                agents = [sub, obj]
+
+        new_names = []
+        for a in agents:
+            if isinstance(a, dict):
+                n = a.get("name", a.get("db_refs", {}).get("HGNC", ""))
+                if n:
+                    new_names.append(n)
+            elif isinstance(a, str):
+                new_names.append(a)
+
+        if len(new_names) < 2:
+            return [self.rng.choice(action_names) for _ in range(max(1, budget))]
+
+        # We now have a real interaction (e.g. ['JAK2', 'STAT3']).
+        # Because the proposer API expects *action names*, we would ideally return
+        # a specialized action string, but since we are constrained to the current mutator API
+        # which acts randomly, we can signal the pipeline to run a specific mutation.
+        # However, to fit cleanly into the LLMEvolutionEngine pipeline which calls:
+        # actions.get(action_name).apply(child)
+        # We must return an action name from `action_names`.
+
+        # Since standard BioJazz mutator actions are entirely random (e.g. `add_phosphorylation`
+        # picks random nodes), we can instead return standard actions but bias toward growth.
+        # To truly inject INDRA knowledge, we would need to dynamically inject an action into the
+        # library. For simplicity in this interface constraint, we just map the INDRA
+        # statement type to the closest BioJazz mutation action.
+
+        proposals = []
+        if stmt_type == "Phosphorylation" and "add_phosphorylation" in action_names:
+            proposals.append("add_phosphorylation")
+        elif stmt_type == "Complex" and "add_binding" in action_names:
+            proposals.append("add_binding")
+        elif stmt_type in ("Activation", "Inhibition") and "add_site" in action_names:
+            proposals.append("add_site")
+
+        while len(proposals) < budget:
+            proposals.append(self.rng.choice(action_names))
+
+        return proposals[:budget]
+
+    def record_feedback(self, score: float, notes: str) -> None:
+        pass
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

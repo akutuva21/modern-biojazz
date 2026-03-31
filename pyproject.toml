@@ -9,7 +9,7 @@ description = "Modern BioJazz architecture with simulation, graph mutations, evo
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "BioJazz Modernization"}]
-dependencies = ["scipy>=1.10"]
+dependencies = ["scipy>=1.10", "torch>=2.0.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

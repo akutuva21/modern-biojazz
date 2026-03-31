@@ -218,6 +218,59 @@ class GraphMutator:
                 if partner not in bind_sites[0].allowed_partners:
                     bind_sites[0].allowed_partners.append(partner)
 
+    def add_kinase_cascade(self, network: ReactionNetwork) -> None:
+        """Adds a 3-tier kinase cascade A -> B -> C."""
+        p1 = f"M_K1_{self.rng.randint(1, 9999)}"
+        p2 = f"M_K2_{self.rng.randint(1, 9999)}"
+        p3 = f"M_K3_{self.rng.randint(1, 9999)}"
+        for p in [p1, p2, p3]:
+            self.add_protein(network, p)
+        self.add_phosphorylation_rule(network, p1, p2, rate=0.5)
+        self.add_phosphorylation_rule(network, p2, p3, rate=0.5)
+
+    def add_negative_feedback_loop(self, network: ReactionNetwork) -> None:
+        """Adds a feedback loop A -> B -> C -| A."""
+        p1 = f"M_F1_{self.rng.randint(1, 9999)}"
+        p2 = f"M_F2_{self.rng.randint(1, 9999)}"
+        p3 = f"M_F3_{self.rng.randint(1, 9999)}"
+        for p in [p1, p2, p3]:
+            self.add_protein(network, p)
+        self.add_phosphorylation_rule(network, p1, p2, rate=0.5)
+        self.add_phosphorylation_rule(network, p2, p3, rate=0.5)
+        self.add_inhibition_rule(network, p3, p1, rate=0.5)
+
+    def crossover(self, net1: ReactionNetwork, net2: ReactionNetwork) -> ReactionNetwork:
+        """Structural crossover of two networks. Returns a new child network."""
+        import copy
+        child = net1.copy()
+        if not net2.proteins:
+            return child
+
+        # Add a random subset of proteins from net2
+        proteins_to_copy = self.rng.sample(list(net2.proteins.keys()), k=max(1, len(net2.proteins) // 2))
+        for p_name in proteins_to_copy:
+            if p_name not in child.proteins:
+                child.proteins[p_name] = copy.deepcopy(net2.proteins[p_name])
+
+        def all_bases_present(tokens: list[str]) -> bool:
+            for t in tokens:
+                if ":" in t:
+                    if not all(p in child.proteins for p in t.split(":")):
+                        return False
+                else:
+                    base = t[:-2] if t.endswith("_P") else (t[:-4] if t.endswith("_inh") else t)
+                    if base not in child.proteins and t not in child.proteins:
+                        return False
+            return True
+
+        # Copy over rules whose proteins are present in child
+        for rule in net2.rules:
+            if self.rng.random() < 0.5 and all_bases_present(rule.reactants) and all_bases_present(rule.products):
+                if not any(r.name == rule.name for r in child.rules):
+                    child.rules.append(copy.deepcopy(rule))
+
+        return child
+
     def action_library(self, network: ReactionNetwork) -> Dict[str, MutationAction]:
         def random_add_site(net: ReactionNetwork) -> None:
             if not net.proteins:
@@ -302,8 +355,16 @@ class GraphMutator:
             target = self.rng.choice(complexes)
             self.add_unbinding_rule(net, target)
 
+        def motif_kinase_cascade(net: ReactionNetwork) -> None:
+            self.add_kinase_cascade(net)
+
+        def motif_feedback_loop(net: ReactionNetwork) -> None:
+            self.add_negative_feedback_loop(net)
+
         return {
             "add_site": MutationAction("add_site", random_add_site),
+            "add_kinase_cascade": MutationAction("add_kinase_cascade", motif_kinase_cascade),
+            "add_feedback_loop": MutationAction("add_feedback_loop", motif_feedback_loop),
             "add_binding": MutationAction("add_binding", random_bind),
             "add_phosphorylation": MutationAction("add_phosphorylation", random_phos),
             "add_dephosphorylation": MutationAction("add_dephosphorylation", random_dephos),
