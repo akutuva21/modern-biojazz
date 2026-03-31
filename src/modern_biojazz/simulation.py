@@ -151,32 +151,40 @@ class LocalCatalystEngine:
         except ImportError:
             solve_ivp = None
 
-        if solve_ivp is not None:
-            solved = solve_ivp(
-                fun=rhs,
-                t_span=(0.0, t_end),
-                y0=y0,
-                method="BDF",
-                t_eval=t_eval,
-                vectorized=False,
-                rtol=1e-6,
-                atol=1e-9,
-            )
-            if not solved.success or solved.y is None:
-                raise RuntimeError(f"BDF solve failed: {solved.message}")
-            y_series = solved.y
-            used_solver = "BDF"
-        else:
-            # Fallback keeps local execution available when SciPy is not present.
-            current = list(y0)
-            snapshots = [list(current)]
-            for _ in range(1, len(t_eval)):
-                deriv = rhs(0.0, current)
-                current = [max(0.0, c + dt * dc) for c, dc in zip(current, deriv)]
-                snapshots.append(list(current))
-            # Shape contract for both solver paths: y_series[species_index][time_index].
-            y_series = [list(col) for col in zip(*snapshots)]
-            used_solver = "EulerFallback"
+        try:
+            if solve_ivp is not None:
+                used_solver = "BDF"
+                solved = solve_ivp(
+                    fun=rhs,
+                    t_span=(0.0, t_end),
+                    y0=y0,
+                    method="BDF",
+                    t_eval=t_eval,
+                    vectorized=False,
+                    rtol=1e-6,
+                    atol=1e-9,
+                )
+                if not solved.success or solved.y is None:
+                    raise RuntimeError(f"BDF solve failed: {solved.message}")
+                y_series = solved.y
+            else:
+                used_solver = "EulerFallback"
+                # Fallback keeps local execution available when SciPy is not present.
+                current = list(y0)
+                snapshots = [list(current)]
+                for _ in range(1, len(t_eval)):
+                    deriv = rhs(0.0, current)
+                    current = [max(0.0, c + dt * dc) for c, dc in zip(current, deriv)]
+                    snapshots.append(list(current))
+                # Shape contract for both solver paths: y_series[species_index][time_index].
+                y_series = [list(col) for col in zip(*snapshots)]
+                used_solver = "EulerFallback"
+        except Exception as exc:
+            return {
+                "trajectory": [],
+                "stats": {"error": str(exc)},
+                "solver": used_solver,
+            }
 
         output_species = network.metadata.get("output_species")
         if output_species not in index:
