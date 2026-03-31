@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Dict, Any
 
@@ -61,30 +62,45 @@ class ModernBioJazzPipeline:
         return PipelineResult(evolution=evolution, grounding=grounding_result)
 
     def _grounding_constraint_filter(self, allowed_symbols: set[str]):
+        # Regex to strip trailing _P or _inh iteratively
+        suffix_pattern = re.compile(r"(_P|_inh)+$")
+
+        _base_cache: Dict[str, str] = {}
+
         def _base_protein(token: str) -> str:
             """Strip derived suffixes to find the base protein name.
-            Handles compound suffixes like STAT3_dup42_P by stripping iteratively."""
-            prev = None
-            while token != prev:
-                prev = token
-                if token.endswith("_P"):
-                    token = token[:-2]
-                elif token.endswith("_inh"):
-                    token = token[:-4]
-                elif "_dup" in token:
-                    token = token[: token.index("_dup")]
+            Handles compound suffixes like STAT3_dup42_P."""
+            if token in _base_cache:
+                return _base_cache[token]
+
+            orig_token = token
+            if "_dup" in token:
+                token = token[: token.index("_dup")]
+            else:
+                token = suffix_pattern.sub("", token)
+
+            _base_cache[orig_token] = token
             return token
 
+        _allowed_cache: Dict[str, bool] = {}
+
         def _is_allowed_token(token: str) -> bool:
+            if token in _allowed_cache:
+                return _allowed_cache[token]
+
+            result = False
             if token in allowed_symbols:
-                return True
-            base = _base_protein(token)
-            if base in allowed_symbols:
-                return True
-            if ":" in token:
-                parts = token.split(":")
-                return all(_base_protein(part) in allowed_symbols for part in parts)
-            return False
+                result = True
+            else:
+                base = _base_protein(token)
+                if base in allowed_symbols:
+                    result = True
+                elif ":" in token:
+                    parts = token.split(":")
+                    result = all(_base_protein(part) in allowed_symbols for part in parts)
+
+            _allowed_cache[token] = result
+            return result
 
         def _filter(network: ReactionNetwork) -> bool:
             for pname in network.proteins:
