@@ -113,6 +113,51 @@ def run_e2e(
     evaluator = FitnessEvaluator(target_output=cfg.fitness_target)
 
     # ── Step 1: Discovery ────────────────────────────────────────────
+    discovery = _run_discovery(cfg)
+
+    # ── Step 2: Assembly ─────────────────────────────────────────────
+    assembly = _run_assembly(cfg, discovery)
+
+    # ── Step 3 & 4: Parse BNGL → ReactionNetwork & Score baseline ────
+    baseline_network, baseline_score = _parse_and_score_baseline(
+        cfg, assembly, evaluator, backend
+    )
+
+    # ── Step 5: Build grounding payload ──────────────────────────────
+    grounding_payload = _build_grounding_from_discovery(discovery, baseline_network)
+
+    # ── Step 6: Evolve ───────────────────────────────────────────────
+    evolved_network, evolved_score, evolution_result, grounding_result = _run_evolution(
+        cfg, baseline_network, grounding_payload, evaluator, backend, rng
+    )
+
+    # ── Step 7: Rate optimization (optional) ─────────────────────────
+    optimized_network, optimized_score = _run_rate_optimization(
+        cfg, evolved_network, evaluator, backend
+    )
+
+    best_score = optimized_score if optimized_score is not None else evolved_score
+
+    return E2EResult(
+        discovery=discovery,
+        assembly=assembly,
+        baseline_network=baseline_network,
+        baseline_score=baseline_score,
+        evolved_network=evolved_network,
+        evolved_score=evolved_score,
+        evolution=evolution_result,
+        optimized_network=optimized_network,
+        optimized_score=optimized_score,
+        improvement=best_score - baseline_score,
+        grounding=grounding_result,
+    )
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _run_discovery(cfg: E2EConfig) -> PathwayDiscoveryResult:
+    """Run discovery or load from snapshot."""
     if cfg.discovery_snapshot:
         discovery = load_discovery_snapshot(cfg.discovery_snapshot)
     else:
@@ -131,7 +176,11 @@ def run_e2e(
     if cfg.save_discovery_to:
         save_discovery_snapshot(discovery, cfg.save_discovery_to)
 
-    # ── Step 2: Assembly ─────────────────────────────────────────────
+    return discovery
+
+
+def _run_assembly(cfg: E2EConfig, discovery: PathwayDiscoveryResult) -> AssemblyResult:
+    """Run INDRA assembly or load from BNGL/snapshot."""
     if cfg.bngl_file:
         assembly = load_bngl_file(cfg.bngl_file)
         assembly.species = discovery.species
@@ -152,7 +201,16 @@ def run_e2e(
     if cfg.save_assembly_to:
         save_assembly_snapshot(assembly, cfg.save_assembly_to)
 
-    # ── Step 3: Parse BNGL → ReactionNetwork ─────────────────────────
+    return assembly
+
+
+def _parse_and_score_baseline(
+    cfg: E2EConfig,
+    assembly: AssemblyResult,
+    evaluator: FitnessEvaluator,
+    backend: SimulationBackend
+) -> tuple[ReactionNetwork, float]:
+    """Parse BNGL into a ReactionNetwork and score it."""
     baseline_network = bngl_to_reaction_network(assembly.bngl_text)
     baseline_network.metadata["pathway"] = "auto"
     baseline_network.metadata["source"] = assembly.source
@@ -167,7 +225,6 @@ def run_e2e(
         if candidates:
             baseline_network.metadata["output_species"] = sorted(candidates)[0]
 
-    # ── Step 4: Score baseline ───────────────────────────────────────
     baseline_score = evaluator.score(
         backend=backend,
         network=baseline_network,
@@ -175,10 +232,18 @@ def run_e2e(
         dt=cfg.sim_dt,
     )
 
-    # ── Step 5: Build grounding payload ──────────────────────────────
-    grounding_payload = _build_grounding_from_discovery(discovery, baseline_network)
+    return baseline_network, baseline_score
 
-    # ── Step 6: Evolve ───────────────────────────────────────────────
+
+def _run_evolution(
+    cfg: E2EConfig,
+    baseline_network: ReactionNetwork,
+    grounding_payload: Dict[str, Any],
+    evaluator: FitnessEvaluator,
+    backend: SimulationBackend,
+    rng: random.Random
+) -> tuple[ReactionNetwork, float, Any, Any]:
+    """Run the evolution pipeline."""
     engine = LLMEvolutionEngine(
         simulation_backend=backend,
         fitness_evaluator=evaluator,
@@ -200,7 +265,16 @@ def run_e2e(
     evolved_network = pipeline_result.evolution.best_network
     evolved_score = pipeline_result.evolution.best_score
 
-    # ── Step 7: Rate optimization (optional) ─────────────────────────
+    return evolved_network, evolved_score, pipeline_result.evolution, pipeline_result.grounding
+
+
+def _run_rate_optimization(
+    cfg: E2EConfig,
+    evolved_network: ReactionNetwork,
+    evaluator: FitnessEvaluator,
+    backend: SimulationBackend
+) -> tuple[Optional[ReactionNetwork], Optional[float]]:
+    """Run rate optimization if enabled."""
     optimized_network = None
     optimized_score = None
 
@@ -226,24 +300,7 @@ def run_e2e(
         optimized_network = de_result.best_network
         optimized_score = de_result.best_score
 
-    best_score = optimized_score if optimized_score is not None else evolved_score
-
-    return E2EResult(
-        discovery=discovery,
-        assembly=assembly,
-        baseline_network=baseline_network,
-        baseline_score=baseline_score,
-        evolved_network=evolved_network,
-        evolved_score=evolved_score,
-        evolution=pipeline_result.evolution,
-        optimized_network=optimized_network,
-        optimized_score=optimized_score,
-        improvement=best_score - baseline_score,
-        grounding=pipeline_result.grounding,
-    )
-
-
-# ── Helpers ──────────────────────────────────────────────────────────
+    return optimized_network, optimized_score
 
 
 def _build_grounding_from_discovery(
