@@ -30,7 +30,7 @@ from .pathway_discovery import (
     load_discovery_snapshot,
     save_discovery_snapshot,
 )
-from .pipeline import ModernBioJazzPipeline, PipelineConfig
+from .pipeline import ModernBioJazzPipeline, PipelineConfig, PipelineResult
 from .rate_optimizer import optimize_rates, DEConfig
 from .simulation import FitnessEvaluator, LocalCatalystEngine, SimulationBackend
 from .site_graph import ReactionNetwork
@@ -113,59 +113,13 @@ def run_e2e(
     evaluator = FitnessEvaluator(target_output=cfg.fitness_target)
 
     # ── Step 1: Discovery ────────────────────────────────────────────
-    if cfg.discovery_snapshot:
-        discovery = load_discovery_snapshot(cfg.discovery_snapshot)
-    else:
-        try:
-            disc = OmniPathDiscovery()
-            discovery = disc.discover(cfg.seed_genes, expand_neighborhood=cfg.expand_neighborhood)
-        except Exception as exc:
-            # Offline fallback: use seed genes directly.
-            discovery = PathwayDiscoveryResult(
-                seed_genes=cfg.seed_genes,
-                species=list(cfg.seed_genes),
-                interactions=[],
-                source=f"fallback::{exc}",
-            )
-
-    if cfg.save_discovery_to:
-        save_discovery_snapshot(discovery, cfg.save_discovery_to)
+    discovery = _run_discovery(cfg)
 
     # ── Step 2: Assembly ─────────────────────────────────────────────
-    if cfg.bngl_file:
-        assembly = load_bngl_file(cfg.bngl_file)
-        assembly.species = discovery.species
-    elif cfg.assembly_snapshot:
-        assembly = load_assembly_snapshot(cfg.assembly_snapshot)
-    else:
-        try:
-            assembler = INDRAAssembler()
-            assembly = assembler.assemble(discovery.species)
-            if not assembly.statements:
-                assembly = _fallback_assembly(
-                    discovery.species, "INDRA returned no statements"
-                )
-        except Exception as exc:
-            # Offline fallback: generate a minimal BNGL from species names.
-            assembly = _fallback_assembly(discovery.species, str(exc))
-
-    if cfg.save_assembly_to:
-        save_assembly_snapshot(assembly, cfg.save_assembly_to)
+    assembly = _run_assembly(cfg, discovery)
 
     # ── Step 3: Parse BNGL → ReactionNetwork ─────────────────────────
-    baseline_network = bngl_to_reaction_network(assembly.bngl_text)
-    baseline_network.metadata["pathway"] = "auto"
-    baseline_network.metadata["source"] = assembly.source
-
-    # Set output_species — user-specified, or auto-detect from BNGL observables,
-    # or pick the first state-qualified species with nontrivial dynamics.
-    if cfg.output_species:
-        baseline_network.metadata["output_species"] = cfg.output_species
-    elif "output_species" not in baseline_network.metadata:
-        # Pick a phosphorylated or activated species as the output target.
-        candidates = [name for name in baseline_network.proteins if "__" in name and ("_p" in name or "_active" in name or "_high" in name)]
-        if candidates:
-            baseline_network.metadata["output_species"] = sorted(candidates)[0]
+    baseline_network = _prepare_baseline_network(cfg, assembly)
 
     # ── Step 4: Score baseline ───────────────────────────────────────
     baseline_score = evaluator.score(
@@ -179,52 +133,16 @@ def run_e2e(
     grounding_payload = _build_grounding_from_discovery(discovery, baseline_network)
 
     # ── Step 6: Evolve ───────────────────────────────────────────────
-    engine = LLMEvolutionEngine(
-        simulation_backend=backend,
-        fitness_evaluator=evaluator,
-        proposer=RandomProposer(random.Random(cfg.random_seed)),
-        mutator=GraphMutator(rng),
-        rng=rng,
+    pipeline_result = _run_evolution(
+        cfg, baseline_network, backend, evaluator, grounding_payload, rng
     )
-    pipeline = ModernBioJazzPipeline(engine, GroundingEngine())
-
-    pipeline_result = pipeline.run(
-        seed_network=baseline_network,
-        config=PipelineConfig(
-            evolution=cfg.evolution,
-            do_grounding=cfg.do_grounding,
-        ),
-        grounding_payload=grounding_payload if cfg.do_grounding else None,
-    )
-
     evolved_network = pipeline_result.evolution.best_network
     evolved_score = pipeline_result.evolution.best_score
 
     # ── Step 7: Rate optimization (optional) ─────────────────────────
-    optimized_network = None
-    optimized_score = None
-
-    if cfg.optimize_rates and evolved_network.rules:
-        def _objective(candidate: ReactionNetwork) -> float:
-            return evaluator.score(
-                backend=backend,
-                network=candidate,
-                t_end=cfg.sim_t_end,
-                dt=cfg.sim_dt,
-            )
-
-        de_result = optimize_rates(
-            network=evolved_network,
-            backend=backend,
-            objective=_objective,
-            config=DEConfig(
-                max_eval=cfg.rate_opt_max_eval,
-                pop_size=cfg.rate_opt_pop_size,
-                seed=cfg.random_seed + 1000,
-            ),
-        )
-        optimized_network = de_result.best_network
-        optimized_score = de_result.best_score
+    optimized_network, optimized_score = _run_rate_optimization(
+        cfg, evolved_network, backend, evaluator
+    )
 
     best_score = optimized_score if optimized_score is not None else evolved_score
 
@@ -244,6 +162,124 @@ def run_e2e(
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _run_discovery(cfg: E2EConfig) -> PathwayDiscoveryResult:
+    if cfg.discovery_snapshot:
+        discovery = load_discovery_snapshot(cfg.discovery_snapshot)
+    else:
+        try:
+            disc = OmniPathDiscovery()
+            discovery = disc.discover(cfg.seed_genes, expand_neighborhood=cfg.expand_neighborhood)
+        except Exception as exc:
+            # Offline fallback: use seed genes directly.
+            discovery = PathwayDiscoveryResult(
+                seed_genes=cfg.seed_genes,
+                species=list(cfg.seed_genes),
+                interactions=[],
+                source=f"fallback::{exc}",
+            )
+
+    if cfg.save_discovery_to:
+        save_discovery_snapshot(discovery, cfg.save_discovery_to)
+    return discovery
+
+
+def _run_assembly(cfg: E2EConfig, discovery: PathwayDiscoveryResult) -> AssemblyResult:
+    if cfg.bngl_file:
+        assembly = load_bngl_file(cfg.bngl_file)
+        assembly.species = discovery.species
+    elif cfg.assembly_snapshot:
+        assembly = load_assembly_snapshot(cfg.assembly_snapshot)
+    else:
+        try:
+            assembler = INDRAAssembler()
+            assembly = assembler.assemble(discovery.species)
+            if not assembly.statements:
+                assembly = _fallback_assembly(
+                    discovery.species, "INDRA returned no statements"
+                )
+        except Exception as exc:
+            # Offline fallback: generate a minimal BNGL from species names.
+            assembly = _fallback_assembly(discovery.species, str(exc))
+
+    if cfg.save_assembly_to:
+        save_assembly_snapshot(assembly, cfg.save_assembly_to)
+    return assembly
+
+
+def _prepare_baseline_network(cfg: E2EConfig, assembly: AssemblyResult) -> ReactionNetwork:
+    baseline_network = bngl_to_reaction_network(assembly.bngl_text)
+    baseline_network.metadata["pathway"] = "auto"
+    baseline_network.metadata["source"] = assembly.source
+
+    # Set output_species — user-specified, or auto-detect from BNGL observables,
+    # or pick the first state-qualified species with nontrivial dynamics.
+    if cfg.output_species:
+        baseline_network.metadata["output_species"] = cfg.output_species
+    elif "output_species" not in baseline_network.metadata:
+        # Pick a phosphorylated or activated species as the output target.
+        candidates = [name for name in baseline_network.proteins if "__" in name and ("_p" in name or "_active" in name or "_high" in name)]
+        if candidates:
+            baseline_network.metadata["output_species"] = sorted(candidates)[0]
+    return baseline_network
+
+
+def _run_evolution(
+    cfg: E2EConfig,
+    baseline_network: ReactionNetwork,
+    backend: SimulationBackend,
+    evaluator: FitnessEvaluator,
+    grounding_payload: Dict[str, Any] | None,
+    rng: random.Random,
+) -> PipelineResult:
+    engine = LLMEvolutionEngine(
+        simulation_backend=backend,
+        fitness_evaluator=evaluator,
+        proposer=RandomProposer(random.Random(cfg.random_seed)),
+        mutator=GraphMutator(rng),
+        rng=rng,
+    )
+    pipeline = ModernBioJazzPipeline(engine, GroundingEngine())
+
+    return pipeline.run(
+        seed_network=baseline_network,
+        config=PipelineConfig(
+            evolution=cfg.evolution,
+            do_grounding=cfg.do_grounding,
+        ),
+        grounding_payload=grounding_payload if cfg.do_grounding else None,
+    )
+
+
+def _run_rate_optimization(
+    cfg: E2EConfig,
+    evolved_network: ReactionNetwork,
+    backend: SimulationBackend,
+    evaluator: FitnessEvaluator,
+) -> tuple[ReactionNetwork | None, float | None]:
+    if not cfg.optimize_rates or not evolved_network.rules:
+        return None, None
+
+    def _objective(candidate: ReactionNetwork) -> float:
+        return evaluator.score(
+            backend=backend,
+            network=candidate,
+            t_end=cfg.sim_t_end,
+            dt=cfg.sim_dt,
+        )
+
+    de_result = optimize_rates(
+        network=evolved_network,
+        backend=backend,
+        objective=_objective,
+        config=DEConfig(
+            max_eval=cfg.rate_opt_max_eval,
+            pop_size=cfg.rate_opt_pop_size,
+            seed=cfg.random_seed + 1000,
+        ),
+    )
+    return de_result.best_network, de_result.best_score
 
 
 def _build_grounding_from_discovery(
