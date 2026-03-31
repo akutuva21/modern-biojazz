@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bngl_converter import bngl_to_reaction_network
 from .evolution import DeterministicProposer, RandomProposer, EvolutionConfig, EvolutionResult, LLMEvolutionEngine
@@ -113,59 +113,13 @@ def run_e2e(
     evaluator = FitnessEvaluator(target_output=cfg.fitness_target)
 
     # ── Step 1: Discovery ────────────────────────────────────────────
-    if cfg.discovery_snapshot:
-        discovery = load_discovery_snapshot(cfg.discovery_snapshot)
-    else:
-        try:
-            disc = OmniPathDiscovery()
-            discovery = disc.discover(cfg.seed_genes, expand_neighborhood=cfg.expand_neighborhood)
-        except Exception as exc:
-            # Offline fallback: use seed genes directly.
-            discovery = PathwayDiscoveryResult(
-                seed_genes=cfg.seed_genes,
-                species=list(cfg.seed_genes),
-                interactions=[],
-                source=f"fallback::{exc}",
-            )
-
-    if cfg.save_discovery_to:
-        save_discovery_snapshot(discovery, cfg.save_discovery_to)
+    discovery = _run_discovery(cfg)
 
     # ── Step 2: Assembly ─────────────────────────────────────────────
-    if cfg.bngl_file:
-        assembly = load_bngl_file(cfg.bngl_file)
-        assembly.species = discovery.species
-    elif cfg.assembly_snapshot:
-        assembly = load_assembly_snapshot(cfg.assembly_snapshot)
-    else:
-        try:
-            assembler = INDRAAssembler()
-            assembly = assembler.assemble(discovery.species)
-            if not assembly.statements:
-                assembly = _fallback_assembly(
-                    discovery.species, "INDRA returned no statements"
-                )
-        except Exception as exc:
-            # Offline fallback: generate a minimal BNGL from species names.
-            assembly = _fallback_assembly(discovery.species, str(exc))
-
-    if cfg.save_assembly_to:
-        save_assembly_snapshot(assembly, cfg.save_assembly_to)
+    assembly = _run_assembly(cfg, discovery)
 
     # ── Step 3: Parse BNGL → ReactionNetwork ─────────────────────────
-    baseline_network = bngl_to_reaction_network(assembly.bngl_text)
-    baseline_network.metadata["pathway"] = "auto"
-    baseline_network.metadata["source"] = assembly.source
-
-    # Set output_species — user-specified, or auto-detect from BNGL observables,
-    # or pick the first state-qualified species with nontrivial dynamics.
-    if cfg.output_species:
-        baseline_network.metadata["output_species"] = cfg.output_species
-    elif "output_species" not in baseline_network.metadata:
-        # Pick a phosphorylated or activated species as the output target.
-        candidates = [name for name in baseline_network.proteins if "__" in name and ("_p" in name or "_active" in name or "_high" in name)]
-        if candidates:
-            baseline_network.metadata["output_species"] = sorted(candidates)[0]
+    baseline_network = _prepare_baseline_network(cfg, assembly)
 
     # ── Step 4: Score baseline ───────────────────────────────────────
     baseline_score = evaluator.score(
@@ -201,6 +155,81 @@ def run_e2e(
     evolved_score = pipeline_result.evolution.best_score
 
     # ── Step 7: Rate optimization (optional) ─────────────────────────
+    optimized_network, optimized_score = _run_rate_optimization(
+        cfg, evolved_network, evaluator, backend
+    )
+
+    best_score = optimized_score if optimized_score is not None else evolved_score
+
+    return E2EResult(
+        discovery=discovery,
+        assembly=assembly,
+        baseline_network=baseline_network,
+        baseline_score=baseline_score,
+        evolved_network=evolved_network,
+        evolved_score=evolved_score,
+        evolution=pipeline_result.evolution,
+        optimized_network=optimized_network,
+        optimized_score=optimized_score,
+        improvement=best_score - baseline_score,
+        grounding=pipeline_result.grounding,
+    )
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _run_assembly(cfg: E2EConfig, discovery: PathwayDiscoveryResult) -> AssemblyResult:
+    """Run INDRA assembly or load from BNGL file/snapshot."""
+    if cfg.bngl_file:
+        assembly = load_bngl_file(cfg.bngl_file)
+        assembly.species = discovery.species
+    elif cfg.assembly_snapshot:
+        assembly = load_assembly_snapshot(cfg.assembly_snapshot)
+    else:
+        try:
+            assembler = INDRAAssembler()
+            assembly = assembler.assemble(discovery.species)
+            if not assembly.statements:
+                assembly = _fallback_assembly(
+                    discovery.species, "INDRA returned no statements"
+                )
+        except Exception as exc:
+            # Offline fallback: generate a minimal BNGL from species names.
+            assembly = _fallback_assembly(discovery.species, str(exc))
+
+    if cfg.save_assembly_to:
+        save_assembly_snapshot(assembly, cfg.save_assembly_to)
+
+    return assembly
+
+
+def _prepare_baseline_network(cfg: E2EConfig, assembly: AssemblyResult) -> ReactionNetwork:
+    """Parse BNGL into a ReactionNetwork and configure metadata."""
+    baseline_network = bngl_to_reaction_network(assembly.bngl_text)
+    baseline_network.metadata["pathway"] = "auto"
+    baseline_network.metadata["source"] = assembly.source
+
+    # Set output_species — user-specified, or auto-detect from BNGL observables,
+    # or pick the first state-qualified species with nontrivial dynamics.
+    if cfg.output_species:
+        baseline_network.metadata["output_species"] = cfg.output_species
+    elif "output_species" not in baseline_network.metadata:
+        # Pick a phosphorylated or activated species as the output target.
+        candidates = [name for name in baseline_network.proteins if "__" in name and ("_p" in name or "_active" in name or "_high" in name)]
+        if candidates:
+            baseline_network.metadata["output_species"] = sorted(candidates)[0]
+
+    return baseline_network
+
+
+def _run_rate_optimization(
+    cfg: E2EConfig,
+    evolved_network: ReactionNetwork,
+    evaluator: FitnessEvaluator,
+    backend: SimulationBackend
+) -> Tuple[Optional[ReactionNetwork], Optional[float]]:
+    """Run rate optimization on the evolved network if configured."""
     optimized_network = None
     optimized_score = None
 
@@ -226,24 +255,30 @@ def run_e2e(
         optimized_network = de_result.best_network
         optimized_score = de_result.best_score
 
-    best_score = optimized_score if optimized_score is not None else evolved_score
-
-    return E2EResult(
-        discovery=discovery,
-        assembly=assembly,
-        baseline_network=baseline_network,
-        baseline_score=baseline_score,
-        evolved_network=evolved_network,
-        evolved_score=evolved_score,
-        evolution=pipeline_result.evolution,
-        optimized_network=optimized_network,
-        optimized_score=optimized_score,
-        improvement=best_score - baseline_score,
-        grounding=pipeline_result.grounding,
-    )
+    return optimized_network, optimized_score
 
 
-# ── Helpers ──────────────────────────────────────────────────────────
+def _run_discovery(cfg: E2EConfig) -> PathwayDiscoveryResult:
+    """Run pathway discovery or load from snapshot."""
+    if cfg.discovery_snapshot:
+        discovery = load_discovery_snapshot(cfg.discovery_snapshot)
+    else:
+        try:
+            disc = OmniPathDiscovery()
+            discovery = disc.discover(cfg.seed_genes, expand_neighborhood=cfg.expand_neighborhood)
+        except Exception as exc:
+            # Offline fallback: use seed genes directly.
+            discovery = PathwayDiscoveryResult(
+                seed_genes=cfg.seed_genes,
+                species=list(cfg.seed_genes),
+                interactions=[],
+                source=f"fallback::{exc}",
+            )
+
+    if cfg.save_discovery_to:
+        save_discovery_snapshot(discovery, cfg.save_discovery_to)
+
+    return discovery
 
 
 def _build_grounding_from_discovery(
