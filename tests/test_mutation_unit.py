@@ -204,3 +204,46 @@ def test_crossover():
 
     # Randomly copied nodes from net2
     assert len(child.proteins) > 2
+
+
+def test_duplicate_protein_with_rewiring_basic():
+    mutator = GraphMutator(random.Random(42))
+    net = ReactionNetwork()
+    mutator.add_protein(net, "A")
+    mutator.add_site(net, "A", "b1", "binding")
+    net.proteins["A"].sites[0].allowed_partners.append("A")
+
+    mutator.add_binding_rule(net, "A", "A", rate=0.1)
+
+    assert len(net.proteins) == 2  # A and A:A
+    assert len(net.rules) == 1
+
+    mutator.duplicate_protein_with_rewiring(net, "A")
+
+    # A duplicate protein should be created
+    assert len(net.proteins) == 3  # A, A:A, and A_dup...
+    dup_name = [p for p in net.proteins if p != "A" and p != "A:A"][0]
+    assert dup_name.startswith("A_dup")
+
+    # It should have rewired the rule A + A -> A:A
+    # The duplicate should have allowed partners rewired
+    dup_protein = net.proteins[dup_name]
+    assert dup_protein.sites[0].allowed_partners == [dup_name]
+
+    # The rules should include the original + 1 rewired rule
+    assert len(net.rules) == 2
+    rewired_rule = net.rules[1]
+    assert rewired_rule.name.startswith("bind_A_A_1_rewired_")
+    assert rewired_rule.reactants == [dup_name, dup_name]
+    assert rewired_rule.products == [f"{dup_name}:{dup_name}"]
+
+
+def test_duplicate_protein_missing_protein():
+    mutator = GraphMutator(random.Random(42))
+    net = ReactionNetwork()
+    mutator.add_protein(net, "A")
+
+    mutator.duplicate_protein_with_rewiring(net, "B")
+
+    assert len(net.proteins) == 1
+    assert "A" in net.proteins
