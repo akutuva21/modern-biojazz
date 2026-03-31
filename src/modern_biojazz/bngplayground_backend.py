@@ -173,21 +173,29 @@ class BNGPlaygroundBackend:
             line = line.strip()
             if not line:
                 continue
+
             try:
                 obj = json.loads(line)
-                if isinstance(obj, dict) and "result" in obj:
-                    result = obj["result"]
-                    # MCP tool results have content[] with text items
-                    if isinstance(result, dict) and "content" in result:
-                        for item in result.get("content", []):
-                            if item.get("type") == "text":
-                                try:
-                                    return json.loads(item["text"])
-                                except (json.JSONDecodeError, TypeError):
-                                    return {"raw_text": item.get("text", "")}
-                    return result
             except json.JSONDecodeError:
                 continue
+
+            if not isinstance(obj, dict) or "result" not in obj:
+                continue
+
+            result = obj["result"]
+
+            # MCP tool results have content[] with text items
+            if not isinstance(result, dict) or "content" not in result:
+                return result
+
+            for item in result.get("content", []):
+                if item.get("type") == "text":
+                    try:
+                        return json.loads(item["text"])
+                    except (json.JSONDecodeError, TypeError):
+                        return {"raw_text": item.get("text", "")}
+
+            return result
 
         return last_response
 
