@@ -17,7 +17,8 @@ Requirements:
 
 Usage:
     backend = BNGPlaygroundBackend(bngplayground_path="/path/to/bngplayground")
-    result = backend.simulate(network, t_end=20.0, dt=1.0, solver="cvode")
+    options = SimulationOptions(t_end=20.0, dt=1.0, solver="cvode")
+    result = backend.simulate(network, options)
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .site_graph import ReactionNetwork
+from .simulation import SimulationOptions
 
 
 @dataclass
@@ -47,24 +49,23 @@ class BNGPlaygroundBackend:
     def simulate(
         self,
         network: ReactionNetwork,
-        t_end: float,
-        dt: float,
-        solver: str = "cvode",
-        initial_conditions: Dict[str, float] | None = None,
+        options: SimulationOptions,
     ) -> Dict[str, Any]:
         """Simulate by converting ReactionNetwork → BNGL text → MCP simulate call."""
-        bngl_code = self._network_to_bngl(network, t_end, dt, initial_conditions)
+        bngl_code = self._network_to_bngl(
+            network, options.t_end, options.dt, options.initial_conditions
+        )
 
         mcp_result = self._call_mcp_tool("simulate", {
             "code": bngl_code,
-            "method": "ode" if solver in ("cvode", "auto", "BDF", "FBDF") else "ode",
-            "t_end": t_end,
-            "n_steps": max(1, int(t_end / dt)),
-            "solver": solver if solver in ("cvode", "cvode_sparse", "rosenbrock23", "rk45") else "cvode",
+            "method": "ode" if options.solver in ("cvode", "auto", "BDF", "FBDF") else "ode",
+            "t_end": options.t_end,
+            "n_steps": max(1, int(options.t_end / options.dt)),
+            "solver": options.solver if options.solver in ("cvode", "cvode_sparse", "rosenbrock23", "rk45") else "cvode",
             "include_species_data": True,
         })
 
-        return self._convert_mcp_result(mcp_result, network, solver)
+        return self._convert_mcp_result(mcp_result, network, options.solver)
 
     def parse_bngl(self, bngl_code: str) -> Dict[str, Any]:
         """Parse BNGL code and return structured model."""
