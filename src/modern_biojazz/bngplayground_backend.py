@@ -163,6 +163,16 @@ class BNGPlaygroundBackend:
         npx = "npx"
         return [npx, "tsx", server_script]
 
+    def _extract_text_content(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract JSON or raw text from the content array of an MCP result."""
+        for item in result.get("content", []):
+            if item.get("type") == "text":
+                try:
+                    return json.loads(item["text"])
+                except (json.JSONDecodeError, TypeError):
+                    return {"raw_text": item.get("text", "")}
+        return None
+
     def _parse_mcp_response(self, stdout: str) -> Dict[str, Any]:
         """Parse the JSON-RPC response(s) from stdout."""
         # The server may emit multiple JSON objects (one per request).
@@ -173,21 +183,23 @@ class BNGPlaygroundBackend:
             line = line.strip()
             if not line:
                 continue
+
             try:
                 obj = json.loads(line)
-                if isinstance(obj, dict) and "result" in obj:
-                    result = obj["result"]
-                    # MCP tool results have content[] with text items
-                    if isinstance(result, dict) and "content" in result:
-                        for item in result.get("content", []):
-                            if item.get("type") == "text":
-                                try:
-                                    return json.loads(item["text"])
-                                except (json.JSONDecodeError, TypeError):
-                                    return {"raw_text": item.get("text", "")}
-                    return result
             except json.JSONDecodeError:
                 continue
+
+            if not isinstance(obj, dict) or "result" not in obj:
+                continue
+
+            result = obj["result"]
+
+            if isinstance(result, dict) and "content" in result:
+                text_content = self._extract_text_content(result)
+                if text_content is not None:
+                    return text_content
+
+            return result
 
         return last_response
 
