@@ -114,6 +114,70 @@ class OpenAICompatibleProposer:
 
 
 @dataclass
+class LLMDenoisingProposer:
+    """Implements discrete diffusion denoising using an LLM to restore/improve a mutated network."""
+
+    inner: OpenAICompatibleProposer
+
+    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
+        prompt = {
+            "role": "user",
+            "content": (
+                "You are an expert biological network builder. We have applied random noise "
+                "(mutations) to a signaling network. Your task is to act as a denoising diffusion step: "
+                "propose structural actions to repair, connect, or improve this network back to a biologically "
+                "valid and functional state. "
+                "Return ONLY a JSON object with key 'actions' containing a list of action names. "
+                f"Allowed actions: {action_names}. "
+                f"Budget: {budget}. "
+                f"Noisy Model: {model_code}"
+            ),
+        }
+
+        payload = {
+            "model": self.inner.model,
+            "messages": [
+                {"role": "system", "content": "Return strict JSON only."},
+                prompt,
+            ],
+            "temperature": 0.4,
+        }
+
+        raw = None
+        last_error: Exception | None = None
+        for attempt in range(self.inner.retry_count + 1):
+            try:
+                req = urllib.request.Request(
+                    url=f"{self.inner.base_url.rstrip('/')}/chat/completions",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.inner.api_key}",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=self.inner.timeout_seconds) as response:
+                    raw = json.loads(response.read().decode("utf-8"))
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt < self.inner.retry_count:
+                    time.sleep(0.2 * (attempt + 1))
+                    continue
+                break
+
+        if raw is None:
+            raise RuntimeError(f"Denoising request failed: {last_error}") from last_error
+
+        content = raw["choices"][0]["message"]["content"]
+        data = self.inner._parse_json_from_text(content)
+        actions = data.get("actions", []) if isinstance(data, dict) else []
+        return [str(x) for x in actions]
+
+    def record_feedback(self, score: float, notes: str) -> None:
+        self.inner.record_feedback(score, notes)
+
+@dataclass
 class SafeActionFilterProposer:
     """Wraps another proposer and enforces budget + allowlist constraints."""
 
