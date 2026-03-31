@@ -191,6 +191,57 @@ class BNGPlaygroundBackend:
 
         return last_response
 
+    def _generate_parameters(self, network: ReactionNetwork) -> List[str]:
+        lines = ["begin parameters"]
+        lines.extend(f"  {rule.name}_rate {rule.rate:.6g}" for rule in network.rules)
+        lines.extend(["end parameters", ""])
+        return lines
+
+    def _generate_molecule_types(self, network: ReactionNetwork) -> List[str]:
+        lines = ["begin molecule types"]
+        for protein in network.proteins.values():
+            if not protein.sites:
+                lines.append(f"  {protein.name}()")
+            else:
+                site_strs = [
+                    f"{site.name}~{'~'.join(site.states)}" if site.states else site.name
+                    for site in protein.sites
+                ]
+                lines.append(f"  {protein.name}({','.join(site_strs)})")
+        lines.extend(["end molecule types", ""])
+        return lines
+
+    def _generate_seed_species(self, network: ReactionNetwork, initial_conditions: Dict[str, float] | None) -> List[str]:
+        ic = initial_conditions or {}
+        lines = ["begin seed species"]
+        for protein in network.proteins.values():
+            conc = ic.get(protein.name, 1.0)
+            if not protein.sites:
+                lines.append(f"  {protein.name}() {conc}")
+            else:
+                init_sites = [
+                    f"{site.name}~{site.states[0]}" if site.states else site.name
+                    for site in protein.sites
+                ]
+                lines.append(f"  {protein.name}({','.join(init_sites)}) {conc}")
+        lines.extend(["end seed species", ""])
+        return lines
+
+    def _generate_rules(self, network: ReactionNetwork) -> List[str]:
+        lines = ["begin reaction rules"]
+        for rule in network.rules:
+            reactant_str = " + ".join(f"{r}()" for r in rule.reactants)
+            product_str = " + ".join(f"{p}()" for p in rule.products)
+            lines.append(f"  {rule.name}: {reactant_str} -> {product_str} {rule.name}_rate")
+        lines.extend(["end reaction rules", ""])
+        return lines
+
+    def _generate_observables(self, network: ReactionNetwork) -> List[str]:
+        lines = ["begin observables"]
+        lines.extend(f"  Molecules {protein.name}_obs {protein.name}()" for protein in network.proteins.values())
+        lines.extend(["end observables", ""])
+        return lines
+
     def _network_to_bngl(
         self,
         network: ReactionNetwork,
@@ -201,67 +252,18 @@ class BNGPlaygroundBackend:
         """Convert a ReactionNetwork to BNGL text for the MCP server."""
         lines = ["begin model", ""]
 
-        # Parameters
-        lines.append("begin parameters")
-        for rule in network.rules:
-            lines.append(f"  {rule.name}_rate {rule.rate:.6g}")
-        lines.append("end parameters")
-        lines.append("")
+        lines.extend(self._generate_parameters(network))
+        lines.extend(self._generate_molecule_types(network))
+        lines.extend(self._generate_seed_species(network, initial_conditions))
+        lines.extend(self._generate_rules(network))
+        lines.extend(self._generate_observables(network))
 
-        # Molecule types
-        lines.append("begin molecule types")
-        for protein in network.proteins.values():
-            if not protein.sites:
-                lines.append(f"  {protein.name}()")
-            else:
-                site_strs = []
-                for site in protein.sites:
-                    if site.states:
-                        site_strs.append(f"{site.name}~{'~'.join(site.states)}")
-                    else:
-                        site_strs.append(site.name)
-                lines.append(f"  {protein.name}({','.join(site_strs)})")
-        lines.append("end molecule types")
-        lines.append("")
-
-        # Seed species
-        ic = initial_conditions or {}
-        lines.append("begin seed species")
-        for protein in network.proteins.values():
-            conc = ic.get(protein.name, 1.0)
-            if not protein.sites:
-                lines.append(f"  {protein.name}() {conc}")
-            else:
-                init_sites = []
-                for site in protein.sites:
-                    if site.states:
-                        init_sites.append(f"{site.name}~{site.states[0]}")
-                    else:
-                        init_sites.append(site.name)
-                lines.append(f"  {protein.name}({','.join(init_sites)}) {conc}")
-        lines.append("end seed species")
-        lines.append("")
-
-        # Rules (simplified — mass action with named parameters)
-        lines.append("begin reaction rules")
-        for rule in network.rules:
-            reactant_str = " + ".join(f"{r}()" for r in rule.reactants)
-            product_str = " + ".join(f"{p}()" for p in rule.products)
-            lines.append(f"  {rule.name}: {reactant_str} -> {product_str} {rule.name}_rate")
-        lines.append("end reaction rules")
-        lines.append("")
-
-        # Observables
-        lines.append("begin observables")
-        for protein in network.proteins.values():
-            lines.append(f"  Molecules {protein.name}_obs {protein.name}()")
-        lines.append("end observables")
-        lines.append("")
-
-        lines.append("end model")
-        lines.append("")
-        lines.append(f"generate_network({{max_iter=>100}})")
-        lines.append(f"simulate({{method=>\"ode\", t_end=>{t_end}, n_steps=>{max(1, int(t_end/dt))}}})")
+        lines.extend([
+            "end model",
+            "",
+            f"generate_network({{max_iter=>100}})",
+            f"simulate({{method=>\"ode\", t_end=>{t_end}, n_steps=>{max(1, int(t_end/dt))}}})"
+        ])
 
         return "\n".join(lines)
 
