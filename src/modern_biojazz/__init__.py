@@ -54,6 +54,7 @@ __all__ = [
     "load_discovery_snapshot",
     "save_discovery_snapshot",
     "INDRAAssembler",
+    "INDRAGraphProposer",
     "AssemblyResult",
     "load_assembly_snapshot",
     "save_assembly_snapshot",

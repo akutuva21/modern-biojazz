@@ -6,6 +6,7 @@ from modern_biojazz.site_graph import ReactionNetwork, Rule, Protein
 from modern_biojazz.mutation import GraphMutator
 from modern_biojazz.neural_diffusion import DDPMContactMapTrainer
 from modern_biojazz.llm_proposer import OpenAICompatibleProposer, LLMDenoisingProposer
+from modern_biojazz.indra_assembly import INDRAGraphProposer
 
 def demo_motifs_and_crossover():
     print("=== Demo 1: Motif-Based Actions and Crossover ===")
@@ -127,7 +128,29 @@ def demo_pytorch_diffusion():
         print(f"  {r.name}: {r.reactants} -> {r.products}")
     print("=" * 50)
 
+def demo_indra_proposer():
+    print("\n=== Demo 4: INDRA-Driven Graph Proposer (No LLM) ===")
+    proposer = INDRAGraphProposer()
+
+    # We will pass a model code string that simulates a small network containing 'STAT3'
+    # The proposer should find STAT3 and fetch statements about it from INDRA.
+    model_code = "n_proteins=1;rules=[];proteins=['STAT3']"
+    action_names = ["add_site", "add_binding", "remove_rule", "add_phosphorylation"]
+
+    print("Seed Network: STAT3")
+    print(f"Allowed actions: {action_names}")
+    print("Querying INDRA REST API for biological connections to STAT3...")
+
+    try:
+        proposed_actions = proposer.propose(model_code, action_names, budget=3)
+        print(f"INDRA Proposer returned actions based on real interactions: {proposed_actions}")
+    except Exception as e:
+        print(f"Failed to query INDRA: {e}")
+    print("=" * 50)
+
+
 if __name__ == "__main__":
     demo_motifs_and_crossover()
     demo_llm_denoising()
     demo_pytorch_diffusion()
+    demo_indra_proposer()
