@@ -27,9 +27,18 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from .site_graph import ReactionNetwork
+
+
+@lru_cache(maxsize=16384)
+def _format_rule(name: str, reactants: tuple, products: tuple) -> str:
+    """Format and cache the string representation of a reaction rule."""
+    reactant_str = " + ".join([r + "()" for r in reactants])
+    product_str = " + ".join([p + "()" for p in products])
+    return f"  {name}: {reactant_str} -> {product_str} {name}_rate"
 
 
 @dataclass
@@ -254,9 +263,7 @@ class BNGPlaygroundBackend:
         # Rules (simplified — mass action with named parameters)
         lines.append("begin reaction rules")
         for rule in network.rules:
-            reactant_str = " + ".join(f"{r}()" for r in rule.reactants)
-            product_str = " + ".join(f"{p}()" for p in rule.products)
-            lines.append(f"  {rule.name}: {reactant_str} -> {product_str} {rule.name}_rate")
+            lines.append(_format_rule(rule.name, tuple(rule.reactants), tuple(rule.products)))
         lines.append("end reaction rules")
         lines.append("")
 
