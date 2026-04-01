@@ -223,6 +223,7 @@ def test_duplicate_protein_with_rewiring_basic():
     # A duplicate protein should be created
     assert len(net.proteins) == 3  # A, A:A, and A_dup...
     dup_name = [p for p in net.proteins if p != "A" and p != "A:A"][0]
+    # Check if duplicate is among the keys
     assert dup_name.startswith("A_dup")
 
     # It should have rewired the rule A + A -> A:A
@@ -247,3 +248,33 @@ def test_duplicate_protein_missing_protein():
 
     assert len(net.proteins) == 1
     assert "A" in net.proteins
+
+
+def test_add_protein_with_name():
+    mutator = GraphMutator(random.Random(42))
+    network = ReactionNetwork()
+    mutator.add_protein(network, "NEW_PROT")
+    assert "NEW_PROT" in network.proteins
+    assert network.proteins["NEW_PROT"].name == "NEW_PROT"
+    assert network.proteins["NEW_PROT"].sites == []
+
+
+def test_add_protein_without_name():
+    mutator = GraphMutator(random.Random(42))
+    network = ReactionNetwork()
+    mutator.add_protein(network, "A")
+    mutator.add_protein(network)
+    # The current implementation generates P2 for the second protein if no name given
+    assert "P2" in network.proteins
+    assert network.proteins["P2"].name == "P2"
+    assert network.proteins["P2"].sites == []
+
+
+def test_add_protein_already_exists():
+    mutator = GraphMutator(random.Random(42))
+    network = ReactionNetwork()
+    network.proteins["EXISTING"] = Protein(name="EXISTING", sites=[Site(name="s1", site_type="binding")])
+    mutator.add_protein(network, "EXISTING")
+    assert "EXISTING" in network.proteins
+    assert len(network.proteins["EXISTING"].sites) == 1
+    assert network.proteins["EXISTING"].sites[0].name == "s1"
