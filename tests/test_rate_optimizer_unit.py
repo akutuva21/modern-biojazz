@@ -77,7 +77,6 @@ def test_optimize_rates_empty_network():
 
     result = optimize_rates(
         network=net,
-        backend=backend,
         objective=lambda n: 0.0,
     )
 
