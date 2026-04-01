@@ -335,9 +335,9 @@ def _fallback_assembly(species: List[str], reason: str) -> AssemblyResult:
         lines.append(f"  {s}() 1.0")
     lines.append("end seed species\nbegin reaction rules\nend reaction rules\nend model")
     return AssemblyResult(
+        species=species,
         statements=[],
         bngl_text="\n".join(lines),
-<<<<<<< HEAD
         source=f"offline_fallback::{reason}",
     )
 
@@ -370,6 +370,7 @@ def print_e2e_summary(result: E2EResult) -> None:
 
 
 def print_evolution_summary(result: E2EResult) -> None:
+    """Print detailed generation stats from the evolution history."""
     print("Evolution generation details:")
     for gen in result.evolution.generation_summary:
         print(
@@ -378,8 +379,3 @@ def print_evolution_summary(result: E2EResult) -> None:
             f"unique_population={gen.unique_population}, "
             f"top_scores={gen.top_scores}"
         )
-=======
-        species=species,
-        source=f"offline_fallback::{reason}",
-    )
->>>>>>> 3dbfa08cb911aa8fb0a300cda97dd90d30f09471

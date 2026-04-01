@@ -36,7 +36,7 @@ class ModernBioJazzPipeline:
             # Build the allowed set from both grounding abstract types AND the seed
             # network's existing proteins so that evolution doesn't reject the starting
             # state or its natural derivatives (phospho, inhibited, complex, duplicated).
-            abstract_keys = set(grounding_payload.get("abstract_types", {}).keys())
+            abstract_keys = set(grounding_payload["abstract"]["nodes"])
             seed_keys = set(seed_network.proteins.keys())
             allowed = abstract_keys | seed_keys
             self.evolution_engine.candidate_filter = self._grounding_constraint_filter(allowed)
@@ -46,17 +46,17 @@ class ModernBioJazzPipeline:
 
         if config.do_grounding and grounding_payload is not None:
             constraints = self.grounding_engine.build_constraint_matrix(
-                grounding_payload["abstract_types"],
-                grounding_payload["real_nodes"],
+                grounding_payload["abstract"]["types"],
+                grounding_payload["real"]["nodes"],
             )
             mappings = self.grounding_engine.match_abstract_to_real(
                 evolution.best_network,
                 constraints,
-                grounding_payload["real_interactions"],
+                grounding_payload["real"]["edges"],
             )
             grounding_result = self.grounding_engine.score_mappings(
                 mappings,
-                grounding_payload["confidence_by_pair"],
+                grounding_payload.get("confidence", {}),
             )
 
         return PipelineResult(evolution=evolution, grounding=grounding_result)
