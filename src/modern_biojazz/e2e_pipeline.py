@@ -364,7 +364,7 @@ def _fallback_assembly(species: List[str], reason: str) -> AssemblyResult:
         species=species,
         statements=[],
         bngl_text="\n".join(lines),
-        source=f"fallback::{reason}",
+        source=f"offline_fallback::{reason}",
     )
 
 
@@ -376,18 +376,23 @@ def print_e2e_summary(result: E2EResult) -> None:
           f"{len(result.baseline_network.rules)} rules, score={result.baseline_score:.4f}")
     print(f"Evolved:   {len(result.evolved_network.proteins)} proteins, "
           f"{len(result.evolved_network.rules)} rules, score={result.evolved_score:.4f}")
+
     if result.optimized_network is not None and result.optimized_score is not None:
         print(f"Optimized: {len(result.optimized_network.rules)} rules, "
               f"score={result.optimized_score:.4f} "
               f"(+{result.optimized_score - result.evolved_score:.4f} from rate tuning)")
+
     sign = "+" if result.improvement >= 0 else ""
     print(f"Delta:     {sign}{result.improvement:.4f}")
+
     if result.grounding:
-        print(f"Grounding: {result.grounding.candidates_considered} candidates, "
-              f"best score={result.grounding.score:.4f}")
-        if result.grounding.mapping:
-            for abstract, real in sorted(result.grounding.mapping.items()):
-                print(f"  {abstract} → {real}")
+        score = getattr(result.grounding, "score", 0.0)
+        candidates = getattr(result.grounding, "candidates_considered", 0)
+        print(f"Grounding: {candidates} candidates, best score={score:.4f}")
+        mapping = getattr(result.grounding, "mapping", None)
+        if mapping:
+            for abstract, real in sorted(mapping.items()):
+                print(f"  {abstract} -> {real}")
 
 
 def print_evolution_summary(result: E2EResult) -> None:
