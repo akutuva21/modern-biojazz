@@ -5,13 +5,12 @@ Operates on log10-transformed rate constants to handle the wide dynamic
 range typical of biochemical systems (1e-6 to 1e3).
 
 Usage:
-    from modern_biojazz.rate_optimizer import optimize_rates
+    from modern_biojazz.rate_optimizer import optimize_rates, DEConfig
 
     result = optimize_rates(
         network=my_network,
-        backend=LocalCatalystEngine(),
-        evaluator=FitnessEvaluator(target_output=1.0),
-        max_eval=500,
+        objective=lambda net: evaluator.score(backend, net, t_end=20.0),
+        config=DEConfig(max_eval=500),
     )
     optimized_network = result.best_network
 """
@@ -20,9 +19,8 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
-from .simulation import SimulationBackend
 from .site_graph import ReactionNetwork
 
 
@@ -41,6 +39,18 @@ class DEConfig:
 
 
 @dataclass
+class DEState:
+    """Internal state for Differential Evolution."""
+    best_x: List[float]
+    best_score: float
+    n_eval: int
+    generations: int
+    converged: bool
+    stop_reason: str
+    history: List[float]
+
+
+@dataclass
 class DEResult:
     """Differential evolution result."""
     best_network: ReactionNetwork
@@ -55,11 +65,8 @@ class DEResult:
 
 def optimize_rates(
     network: ReactionNetwork,
-    backend: SimulationBackend,
     objective: Callable[[ReactionNetwork], float],
     config: Optional[DEConfig] = None,
-    t_end: float = 20.0,
-    dt: float = 1.0,
 ) -> DEResult:
     """Optimize rate constants of a ReactionNetwork using Differential Evolution.
 
@@ -67,8 +74,6 @@ def optimize_rates(
     ----------
     network : ReactionNetwork
         The network whose rates will be optimized. Not mutated.
-    backend : SimulationBackend
-        Used by the objective function (if it needs simulation).
     objective : callable
         Takes a ReactionNetwork, returns a score to MAXIMIZE.
         Typically wraps a FitnessEvaluator.
@@ -109,15 +114,7 @@ def optimize_rates(
         seed_rates.append(math.log10(rate))
     population[0] = [max(lb, min(ub, x)) for x in seed_rates]
 
-    def evaluate(log_rates: List[float]) -> float:
-        """Build network with given rates and score it."""
-        candidate = network.copy()
-        for i, idx in enumerate(rate_indices):
-            candidate.rules[idx].rate = 10.0 ** max(lb, min(ub, log_rates[i]))
-        try:
-            return objective(candidate)
-        except Exception:
-            return 0.0
+    evaluate = _make_evaluator(network, rate_indices, lb, ub, objective)
 
     # Evaluate initial population.
     scores = [evaluate(ind) for ind in population]
@@ -180,45 +177,70 @@ def optimize_rates(
         prev_best = best_score
 
         if stagnant >= cfg.patience:
-            return _build_result(
-                network, rate_indices, best_x, best_score, n_eval, generation,
-                True, "patience", history, lb, ub,
+            state = DEState(
+                best_x=best_x,
+                best_score=best_score,
+                n_eval=n_eval,
+                generations=generation,
+                converged=True,
+                stop_reason="patience",
+                history=history,
             )
+            return _build_result(network, rate_indices, state, lb, ub)
 
     stop = "converged_f" if stagnant >= cfg.patience else "maxeval"
-    return _build_result(
-        network, rate_indices, best_x, best_score, n_eval, generation,
-        stop == "converged_f", stop, history, lb, ub,
+    state = DEState(
+        best_x=best_x,
+        best_score=best_score,
+        n_eval=n_eval,
+        generations=generation,
+        converged=(stop == "converged_f"),
+        stop_reason=stop,
+        history=history,
     )
+    return _build_result(network, rate_indices, state, lb, ub)
+
+
+def _make_evaluator(
+    network: ReactionNetwork,
+    rate_indices: List[int],
+    lb: float,
+    ub: float,
+    objective: Callable[[ReactionNetwork], float],
+) -> Callable[[List[float]], float]:
+    """Create the evaluation function for DE."""
+    def evaluate(log_rates: List[float]) -> float:
+        candidate = network.copy()
+        for i, idx in enumerate(rate_indices):
+            candidate.rules[idx].rate = 10.0 ** max(lb, min(ub, log_rates[i]))
+        try:
+            return objective(candidate)
+        except Exception:
+            return 0.0
+    return evaluate
 
 
 def _build_result(
     network: ReactionNetwork,
     rate_indices: List[int],
-    best_x: List[float],
-    best_score: float,
-    n_eval: int,
-    generations: int,
-    converged: bool,
-    stop_reason: str,
-    history: List[float],
+    state: DEState,
     lb: float,
     ub: float,
 ) -> DEResult:
     best_network = network.copy()
     best_rates = []
     for i, idx in enumerate(rate_indices):
-        rate = 10.0 ** max(lb, min(ub, best_x[i]))
+        rate = 10.0 ** max(lb, min(ub, state.best_x[i]))
         best_network.rules[idx].rate = rate
         best_rates.append(rate)
 
     return DEResult(
         best_network=best_network,
         best_rates=best_rates,
-        best_score=best_score,
-        n_eval=n_eval,
-        generations=generations,
-        converged=converged,
-        stop_reason=stop_reason,
-        history=history,
+        best_score=state.best_score,
+        n_eval=state.n_eval,
+        generations=state.generations,
+        converged=state.converged,
+        stop_reason=state.stop_reason,
+        history=state.history,
     )

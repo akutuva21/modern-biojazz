@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from modern_biojazz.benchmarking import compare_backends
+from modern_biojazz.benchmarking import compare_backends, BenchmarkConfig
 from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator
 
 
@@ -20,7 +20,7 @@ def test_benchmark_compare_backends_e2e(seed_network):
         baseline=baseline,
         network=seed_network,
         evaluator=FitnessEvaluator(target_output=1.0),
-        runs=3,
+        config=BenchmarkConfig(runs=3),
     )
 
     assert metrics["speedup"] > 1.0
