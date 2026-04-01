@@ -107,17 +107,7 @@ def test_pipeline_grounding_includes_seed_proteins(seed_network, grounding_paylo
             evolution=EvolutionConfig(population_size=4, generations=2, mutations_per_candidate=1),
             do_grounding=True,
         ),
-        grounding_payload={
-            "abstract": {
-                "nodes": list(grounding_payload["abstract_types"].keys()),
-                "types": grounding_payload["abstract_types"],
-            },
-            "real": {
-                "nodes": grounding_payload["real_nodes"],
-                "edges": [tuple(x) for x in grounding_payload["real_interactions"]],
-            },
-            "confidence": grounding_payload["confidence_by_pair"],
-        },
+        grounding_payload=grounding_payload,
     )
     # Must not crash and should produce a valid result.
     assert result.evolution.best_score >= 0.0

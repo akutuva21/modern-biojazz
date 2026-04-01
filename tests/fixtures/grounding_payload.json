@@ -1,18 +1,23 @@
 {
-  "abstract_types": {
-    "STAT3": "tf",
-    "SOCS3": "regulator"
+  "abstract": {
+    "nodes": ["STAT3", "SOCS3"],
+    "types": {
+      "STAT3": "tf",
+      "SOCS3": "regulator"
+    }
   },
-  "real_nodes": [
-    {"name": "STAT3_HUMAN", "type": "tf"},
-    {"name": "STAT5B_HUMAN", "type": "tf"},
-    {"name": "SOCS3_HUMAN", "type": "regulator"}
-  ],
-  "real_interactions": [
-    ["STAT3_HUMAN", "SOCS3_HUMAN", "phosphorylation"],
-    ["STAT5B_HUMAN", "SOCS3_HUMAN", "phosphorylation"]
-  ],
-  "confidence_by_pair": {
+  "real": {
+    "nodes": [
+      {"name": "STAT3_HUMAN", "type": "tf"},
+      {"name": "STAT5B_HUMAN", "type": "tf"},
+      {"name": "SOCS3_HUMAN", "type": "regulator"}
+    ],
+    "edges": [
+      ["STAT3_HUMAN", "SOCS3_HUMAN", "phosphorylation"],
+      ["STAT5B_HUMAN", "SOCS3_HUMAN", "phosphorylation"]
+    ]
+  },
+  "confidence": {
     "STAT3->STAT3_HUMAN": 0.95,
     "SOCS3->SOCS3_HUMAN": 0.9,
     "STAT3->STAT5B_HUMAN": 0.5

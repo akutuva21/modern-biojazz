@@ -32,12 +32,7 @@ def test_full_pipeline_e2e(seed_network, grounding_payload):
             ),
             do_grounding=True,
         ),
-        grounding_payload={
-            "abstract_types": grounding_payload["abstract_types"],
-            "real_nodes": grounding_payload["real_nodes"],
-            "real_interactions": [tuple(x) for x in grounding_payload["real_interactions"]],
-            "confidence_by_pair": grounding_payload["confidence_by_pair"],
-        },
+        grounding_payload=grounding_payload,
     )
 
     assert result.evolution.best_score >= 0.0
@@ -46,7 +41,7 @@ def test_full_pipeline_e2e(seed_network, grounding_payload):
 
     # Validate all tokens are within the grounding constraint vocabulary.
     # The filter allows: base proteins, _P, _inh, _dupNNNN, colon-complexes.
-    allowed = set(grounding_payload["abstract_types"].keys()) | set(seed_network.proteins.keys())
+    allowed = set(grounding_payload["abstract"]["nodes"]) | set(seed_network.proteins.keys())
 
     def _base(tok: str) -> str:
         if tok.endswith("_P"):

@@ -7,15 +7,15 @@ def test_grounding_engine_e2e(seed_network, grounding_payload):
     engine = GroundingEngine()
 
     constraints = engine.build_constraint_matrix(
-        grounding_payload["abstract_types"],
-        grounding_payload["real_nodes"],
+        grounding_payload["abstract"]["types"],
+        grounding_payload["real"]["nodes"],
     )
     mappings = engine.match_abstract_to_real(
         seed_network,
         constraints,
-        [tuple(x) for x in grounding_payload["real_interactions"]],
+        [tuple(x) for x in grounding_payload["real"]["edges"]],
     )
-    result = engine.score_mappings(mappings, grounding_payload["confidence_by_pair"])
+    result = engine.score_mappings(mappings, grounding_payload["confidence"])
 
     assert "STAT3" in constraints
     assert result.candidates_considered >= 1
