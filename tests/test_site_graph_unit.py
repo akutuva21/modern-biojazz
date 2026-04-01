@@ -29,6 +29,33 @@ def test_from_dict_missing_key_raises_helpful_error():
         )
 
 
+def test_validate_mismatched_protein_key():
+    with pytest.raises(ReactionNetworkValidationError, match="does not match protein.name"):
+        ReactionNetwork.from_dict(
+            {
+                "proteins": {"P1": {"name": "P2", "sites": []}},
+                "rules": [],
+                "metadata": {},
+            }
+        )
+
+
+def test_validate_invalid_site_type():
+    with pytest.raises(ReactionNetworkValidationError, match="invalid site_type"):
+        ReactionNetwork.from_dict(
+            {
+                "proteins": {
+                    "P1": {
+                        "name": "P1",
+                        "sites": [{"name": "s1", "site_type": "invalid_type"}]
+                    }
+                },
+                "rules": [],
+                "metadata": {},
+            }
+        )
+
+
 def test_from_dict_invalid_rule_shape_raises_helpful_error():
     with pytest.raises(ReactionNetworkValidationError, match="missing required keys"):
         ReactionNetwork.from_dict(
