@@ -108,10 +108,15 @@ def test_pipeline_grounding_includes_seed_proteins(seed_network, grounding_paylo
             do_grounding=True,
         ),
         grounding_payload={
-            "abstract_types": grounding_payload["abstract_types"],
-            "real_nodes": grounding_payload["real_nodes"],
-            "real_interactions": [tuple(x) for x in grounding_payload["real_interactions"]],
-            "confidence_by_pair": grounding_payload["confidence_by_pair"],
+            "abstract": {
+                "nodes": list(grounding_payload["abstract_types"].keys()),
+                "types": grounding_payload["abstract_types"],
+            },
+            "real": {
+                "nodes": grounding_payload["real_nodes"],
+                "edges": [tuple(x) for x in grounding_payload["real_interactions"]],
+            },
+            "confidence": grounding_payload["confidence_by_pair"],
         },
     )
     # Must not crash and should produce a valid result.
