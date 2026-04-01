@@ -14,8 +14,8 @@ from .llm_proposer import OpenAICompatibleProposer, SafeActionFilterProposer
 from .benchmarking import benchmark_backend, compare_backends, BenchmarkResult
 from .bngl_converter import bngl_to_reaction_network
 from .pathway_discovery import OmniPathDiscovery, PathwayDiscoveryResult, load_discovery_snapshot, save_discovery_snapshot
-from .indra_assembly import INDRAAssembler, AssemblyResult, load_assembly_snapshot, save_assembly_snapshot, load_bngl_file
-from .e2e_pipeline import run_e2e, E2EConfig, E2EResult, print_e2e_summary
+from .indra_assembly import INDRAAssembler, INDRAGraphProposer, AssemblyResult, load_assembly_snapshot, save_assembly_snapshot, load_bngl_file
+from .e2e_pipeline import E2EConfig, E2EResult, print_e2e_summary
 from .rate_optimizer import optimize_rates, DEConfig, DEResult
 from .bngplayground_backend import BNGPlaygroundBackend
 
@@ -59,7 +59,6 @@ __all__ = [
     "load_assembly_snapshot",
     "save_assembly_snapshot",
     "load_bngl_file",
-    "run_e2e",
     "E2EConfig",
     "E2EResult",
     "print_e2e_summary",
