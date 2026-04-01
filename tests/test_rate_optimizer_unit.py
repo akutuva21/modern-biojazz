@@ -71,6 +71,21 @@ def test_de_handles_zero_rules():
     assert result.n_eval == 0
 
 
+def test_optimize_rates_empty_network():
+    net = ReactionNetwork(proteins={}, rules=[])
+    backend = LocalCatalystEngine()
+
+    result = optimize_rates(
+        network=net,
+        backend=backend,
+        objective=lambda n: 0.0,
+    )
+
+    assert result.best_network is not net
+    assert result.best_network.proteins == net.proteins
+    assert result.best_network.rules == net.rules
+
+
 def test_de_history_is_monotonic():
     net = _simple_network()
     backend = LocalCatalystEngine()
