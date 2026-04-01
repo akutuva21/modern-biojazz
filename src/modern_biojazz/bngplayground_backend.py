@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -130,7 +131,7 @@ class BNGPlaygroundBackend:
         try:
             # Try tsx first (TypeScript loader), fall back to compiled JS
             cmd = self._build_command(server_script)
-            proc = subprocess.run(
+            proc = subprocess.run(  # nosec B603
                 cmd,
                 input=stdin_data,
                 capture_output=True,
@@ -152,16 +153,24 @@ class BNGPlaygroundBackend:
 
     def _build_command(self, server_script: str) -> List[str]:
         """Build the command to launch the MCP server."""
+        # Resolve executables to absolute paths to prevent cwd hijacking
+        node_exec = shutil.which(self.node_command)
+        if not node_exec:
+            raise FileNotFoundError(f"Could not find executable for '{self.node_command}'")
+
         # Check if dist/index.js exists (pre-compiled)
         dist_path = os.path.join(
             self.bngplayground_path, "packages", "mcp-server", "dist", "index.js"
         )
         if os.path.exists(dist_path):
-            return [self.node_command, dist_path]
+            return [node_exec, dist_path]
 
         # Fall back to tsx for TypeScript
-        npx = "npx"
-        return [npx, "tsx", server_script]
+        npx_exec = shutil.which("npx")
+        if not npx_exec:
+            raise FileNotFoundError("Could not find executable for 'npx'")
+
+        return [npx_exec, "tsx", server_script]
 
     def _parse_mcp_response(self, stdout: str) -> Dict[str, Any]:
         """Parse the JSON-RPC response(s) from stdout."""
