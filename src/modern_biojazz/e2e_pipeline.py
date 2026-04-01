@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from .bngl_converter import bngl_to_reaction_network
-from .evolution import DeterministicProposer, RandomProposer, EvolutionConfig, EvolutionResult, LLMEvolutionEngine
+from .evolution import RandomProposer, EvolutionConfig, EvolutionResult, LLMEvolutionEngine
 from .grounding import GroundingEngine
 from .indra_assembly import (
     AssemblyResult,
@@ -95,18 +95,7 @@ def run_e2e(
     config: Optional[E2EConfig] = None,
     simulation_backend: Optional[SimulationBackend] = None,
 ) -> E2EResult:
-    """Run the full end-to-end pipeline.
-
-    Steps:
-      1. Discover pathway species (OmniPath or snapshot)
-      2. Assemble INDRA baseline (live, snapshot, or raw BNGL file)
-      3. Parse BNGL → ReactionNetwork (baseline)
-      4. Score baseline
-      5. Build grounding payload from discovery data
-      6. Evolve from baseline seed
-      7. Score evolved network
-      8. Compare
-    """
+    """Run the full end-to-end pipeline from discovery to evolution and optimization."""
     cfg = config or E2EConfig()
     rng = random.Random(cfg.random_seed)
     backend = simulation_backend or LocalCatalystEngine()
@@ -118,7 +107,7 @@ def run_e2e(
     # ── Step 2: Assembly ─────────────────────────────────────────────
     assembly = _run_assembly(cfg, discovery)
 
-    # ── Step 3: Parse BNGL → ReactionNetwork ─────────────────────────
+    # ── Step 3: Parse BNGL → ReactionNetwork (baseline) ──────────────
     baseline_network = _prepare_baseline_network(cfg, assembly)
 
     # ── Step 4: Score baseline ───────────────────────────────────────
@@ -129,7 +118,7 @@ def run_e2e(
         dt=cfg.sim_dt,
     )
 
-    # ── Step 5: Build grounding payload ──────────────────────────────
+    # ── Step 5: Build grounding payload from discovery data ──────────
     grounding_payload = _build_grounding_from_discovery(discovery, baseline_network)
 
     # ── Step 6: Evolve ───────────────────────────────────────────────
@@ -159,6 +148,8 @@ def run_e2e(
         improvement=best_score - baseline_score,
         grounding=pipeline_result.grounding,
     )
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
@@ -181,11 +172,12 @@ def _run_discovery(cfg: E2EConfig) -> PathwayDiscoveryResult:
 
     if cfg.save_discovery_to:
         save_discovery_snapshot(discovery, cfg.save_discovery_to)
+
     return discovery
 
 
 def _run_assembly(cfg: E2EConfig, discovery: PathwayDiscoveryResult) -> AssemblyResult:
-    """Run INDRA assembly or load from BNGL file/snapshot."""
+    """Run INDRA assembly or load from BNGL/snapshot."""
     if cfg.bngl_file:
         assembly = load_bngl_file(cfg.bngl_file)
         assembly.species = discovery.species
@@ -205,17 +197,17 @@ def _run_assembly(cfg: E2EConfig, discovery: PathwayDiscoveryResult) -> Assembly
 
     if cfg.save_assembly_to:
         save_assembly_snapshot(assembly, cfg.save_assembly_to)
+
     return assembly
 
 
 def _prepare_baseline_network(cfg: E2EConfig, assembly: AssemblyResult) -> ReactionNetwork:
-    """Parse BNGL into a ReactionNetwork and configure metadata."""
+    """Parse BNGL into a ReactionNetwork and configure metadata/outputs."""
     baseline_network = bngl_to_reaction_network(assembly.bngl_text)
     baseline_network.metadata["pathway"] = "auto"
     baseline_network.metadata["source"] = assembly.source
 
-    # Set output_species — user-specified, or auto-detect from BNGL observables,
-    # or pick the first state-qualified species with nontrivial dynamics.
+    # Set output_species — user-specified, or auto-detect from properties
     if cfg.output_species:
         baseline_network.metadata["output_species"] = cfg.output_species
     elif "output_species" not in baseline_network.metadata:
@@ -223,6 +215,7 @@ def _prepare_baseline_network(cfg: E2EConfig, assembly: AssemblyResult) -> React
         candidates = [name for name in baseline_network.proteins if "__" in name and ("_p" in name or "_active" in name or "_high" in name)]
         if candidates:
             baseline_network.metadata["output_species"] = sorted(candidates)[0]
+
     return baseline_network
 
 
@@ -260,7 +253,7 @@ def _run_rate_optimization(
     evaluator: FitnessEvaluator,
     backend: SimulationBackend,
 ) -> tuple[ReactionNetwork | None, float | None]:
-    """Run rate optimization on the evolved network if configured."""
+    """Run differential evolution to optimize rate constants if configured."""
     optimized_network = None
     optimized_score = None
 
@@ -292,7 +285,7 @@ def _build_grounding_from_discovery(
     discovery: PathwayDiscoveryResult,
     baseline_network: ReactionNetwork,
 ) -> Dict[str, Any]:
-    """Build grounding payload from discovery interactions + baseline protein types."""
+    """Build biological grounding constraints from OmniPath discovery data."""
     abstract_types: Dict[str, str] = {}
     for pname in baseline_network.proteins:
         has_mod = any(s.site_type == "modification" for s in baseline_network.proteins[pname].sites)
@@ -317,85 +310,33 @@ def _build_grounding_from_discovery(
         elif is_stim:
             edge_type = "phosphorylation"
         else:
-            edge_type = "binding"
-        if src and dst:
-            real_interactions.append((src, dst, edge_type))
+            edge_type = "activation"
 
-    confidence_by_pair: Dict[str, float] = {}
-    for abstract in abstract_types:
-        for node in real_nodes:
-            if node["name"] == abstract:
-                confidence_by_pair[f"{abstract}->{node['name']}"] = 0.99
-            elif node["name"].startswith(abstract):
-                confidence_by_pair[f"{abstract}->{node['name']}"] = 0.8
+        if src and dst:
+            real_interactions.append({
+                "source": src,
+                "target": dst,
+                "type": edge_type,
+            })
 
     return {
-        "abstract_types": abstract_types,
-        "real_nodes": real_nodes,
-        "real_interactions": real_interactions,
-        "confidence_by_pair": confidence_by_pair,
+        "abstract": {"nodes": list(abstract_types.keys()), "types": abstract_types},
+        "real": {"nodes": real_nodes, "edges": real_interactions},
     }
 
 
 def _fallback_assembly(species: List[str], reason: str) -> AssemblyResult:
-    """Generate a minimal BNGL model from species names when INDRA is unavailable."""
-    lines = ["begin model", "", "begin parameters", "  kf 0.01", "end parameters", ""]
-    lines.append("begin molecule types")
-    for sp in species:
-        lines.append(f"  {sp}()")
-    lines.append("end molecule types")
-    lines.append("")
-    lines.append("begin seed species")
-    for sp in species:
-        lines.append(f"  {sp}() 1.0")
-    lines.append("end seed species")
-    lines.append("")
-    lines.append("begin reaction rules")
-    lines.append("end reaction rules")
-    lines.append("")
-    lines.append("begin observables")
-    for sp in species:
-        lines.append(f"  Molecules {sp}_obs {sp}()")
-    lines.append("end observables")
-    lines.append("")
-    lines.append("end model")
-
+    """Generate a minimal seed BNGL model when live INDRA assembly fails."""
+    lines = ["begin model", "begin molecule types"]
+    for s in species:
+        lines.append(f"  {s}()")
+    lines.append("end molecule types\nbegin seed species")
+    for s in species:
+        lines.append(f"  {s}() 1.0")
+    lines.append("end seed species\nbegin reaction rules\nend reaction rules\nend model")
     return AssemblyResult(
-        species=species,
         statements=[],
         bngl_text="\n".join(lines),
-        source=f"fallback::{reason}",
+        species=species,
+        source=f"offline_fallback::{reason}",
     )
-
-
-def print_e2e_summary(result: E2EResult) -> None:
-    """Print a human-readable summary of the E2E run."""
-    print(f"Discovery: {len(result.discovery.species)} species from {result.discovery.source}")
-    print(f"Assembly:  {len(result.assembly.statements)} statements from {result.assembly.source}")
-    print(f"Baseline:  {len(result.baseline_network.proteins)} proteins, "
-          f"{len(result.baseline_network.rules)} rules, score={result.baseline_score:.4f}")
-    print(f"Evolved:   {len(result.evolved_network.proteins)} proteins, "
-          f"{len(result.evolved_network.rules)} rules, score={result.evolved_score:.4f}")
-    if result.optimized_network is not None and result.optimized_score is not None:
-        print(f"Optimized: {len(result.optimized_network.rules)} rules, "
-              f"score={result.optimized_score:.4f} "
-              f"(+{result.optimized_score - result.evolved_score:.4f} from rate tuning)")
-    sign = "+" if result.improvement >= 0 else ""
-    print(f"Delta:     {sign}{result.improvement:.4f}")
-    if result.grounding:
-        print(f"Grounding: {result.grounding.candidates_considered} candidates, "
-              f"best score={result.grounding.score:.4f}")
-        if result.grounding.mapping:
-            for abstract, real in sorted(result.grounding.mapping.items()):
-                print(f"  {abstract} → {real}")
-
-
-def print_evolution_summary(result: E2EResult) -> None:
-    print("Evolution generation details:")
-    for gen in result.evolution.generation_summary:
-        print(
-            f"gen {gen.generation}: best={gen.best_score:.4f}, "
-            f"proteins={gen.best_n_proteins}, rules={gen.best_n_rules}, "
-            f"unique_population={gen.unique_population}, "
-            f"top_scores={gen.top_scores}"
-        )
