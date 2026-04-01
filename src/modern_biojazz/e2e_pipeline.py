@@ -30,7 +30,7 @@ from .pathway_discovery import (
     load_discovery_snapshot,
     save_discovery_snapshot,
 )
-from .pipeline import ModernBioJazzPipeline, PipelineConfig
+from .pipeline import ModernBioJazzPipeline, PipelineConfig, PipelineResult
 from .rate_optimizer import optimize_rates, DEConfig
 from .simulation import FitnessEvaluator, LocalCatalystEngine, SimulationBackend
 from .site_graph import ReactionNetwork
@@ -133,24 +133,9 @@ def run_e2e(
     grounding_payload = _build_grounding_from_discovery(discovery, baseline_network)
 
     # ── Step 6: Evolve ───────────────────────────────────────────────
-    engine = LLMEvolutionEngine(
-        simulation_backend=backend,
-        fitness_evaluator=evaluator,
-        proposer=RandomProposer(random.Random(cfg.random_seed)),
-        mutator=GraphMutator(rng),
-        rng=rng,
+    pipeline_result = _run_evolution(
+        cfg, baseline_network, backend, evaluator, grounding_payload, rng
     )
-    pipeline = ModernBioJazzPipeline(engine, GroundingEngine())
-
-    pipeline_result = pipeline.run(
-        seed_network=baseline_network,
-        config=PipelineConfig(
-            evolution=cfg.evolution,
-            do_grounding=cfg.do_grounding,
-        ),
-        grounding_payload=grounding_payload if cfg.do_grounding else None,
-    )
-
     evolved_network = pipeline_result.evolution.best_network
     evolved_score = pipeline_result.evolution.best_score
 
@@ -174,9 +159,29 @@ def run_e2e(
         improvement=best_score - baseline_score,
         grounding=pipeline_result.grounding,
     )
-
-
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _run_discovery(cfg: E2EConfig) -> PathwayDiscoveryResult:
+    """Run pathway discovery or load from snapshot."""
+    if cfg.discovery_snapshot:
+        discovery = load_discovery_snapshot(cfg.discovery_snapshot)
+    else:
+        try:
+            disc = OmniPathDiscovery()
+            discovery = disc.discover(cfg.seed_genes, expand_neighborhood=cfg.expand_neighborhood)
+        except Exception as exc:
+            # Offline fallback: use seed genes directly.
+            discovery = PathwayDiscoveryResult(
+                seed_genes=cfg.seed_genes,
+                species=list(cfg.seed_genes),
+                interactions=[],
+                source=f"fallback::{exc}",
+            )
+
+    if cfg.save_discovery_to:
+        save_discovery_snapshot(discovery, cfg.save_discovery_to)
+    return discovery
 
 
 def _run_assembly(cfg: E2EConfig, discovery: PathwayDiscoveryResult) -> AssemblyResult:
@@ -200,7 +205,6 @@ def _run_assembly(cfg: E2EConfig, discovery: PathwayDiscoveryResult) -> Assembly
 
     if cfg.save_assembly_to:
         save_assembly_snapshot(assembly, cfg.save_assembly_to)
-
     return assembly
 
 
@@ -219,16 +223,43 @@ def _prepare_baseline_network(cfg: E2EConfig, assembly: AssemblyResult) -> React
         candidates = [name for name in baseline_network.proteins if "__" in name and ("_p" in name or "_active" in name or "_high" in name)]
         if candidates:
             baseline_network.metadata["output_species"] = sorted(candidates)[0]
-
     return baseline_network
+
+
+def _run_evolution(
+    cfg: E2EConfig,
+    baseline_network: ReactionNetwork,
+    backend: SimulationBackend,
+    evaluator: FitnessEvaluator,
+    grounding_payload: Dict[str, Any] | None,
+    rng: random.Random,
+) -> PipelineResult:
+    """Configure and run the evolution engine."""
+    engine = LLMEvolutionEngine(
+        simulation_backend=backend,
+        fitness_evaluator=evaluator,
+        proposer=RandomProposer(random.Random(cfg.random_seed)),
+        mutator=GraphMutator(rng),
+        rng=rng,
+    )
+    pipeline = ModernBioJazzPipeline(engine, GroundingEngine())
+
+    return pipeline.run(
+        seed_network=baseline_network,
+        config=PipelineConfig(
+            evolution=cfg.evolution,
+            do_grounding=cfg.do_grounding,
+        ),
+        grounding_payload=grounding_payload if cfg.do_grounding else None,
+    )
 
 
 def _run_rate_optimization(
     cfg: E2EConfig,
     evolved_network: ReactionNetwork,
     evaluator: FitnessEvaluator,
-    backend: SimulationBackend
-) -> Tuple[Optional[ReactionNetwork], Optional[float]]:
+    backend: SimulationBackend,
+) -> tuple[ReactionNetwork | None, float | None]:
     """Run rate optimization on the evolved network if configured."""
     optimized_network = None
     optimized_score = None
@@ -255,29 +286,6 @@ def _run_rate_optimization(
         optimized_score = de_result.best_score
 
     return optimized_network, optimized_score
-
-
-def _run_discovery(cfg: E2EConfig) -> PathwayDiscoveryResult:
-    """Run pathway discovery or load from snapshot."""
-    if cfg.discovery_snapshot:
-        discovery = load_discovery_snapshot(cfg.discovery_snapshot)
-    else:
-        try:
-            disc = OmniPathDiscovery()
-            discovery = disc.discover(cfg.seed_genes, expand_neighborhood=cfg.expand_neighborhood)
-        except Exception as exc:
-            # Offline fallback: use seed genes directly.
-            discovery = PathwayDiscoveryResult(
-                seed_genes=cfg.seed_genes,
-                species=list(cfg.seed_genes),
-                interactions=[],
-                source=f"fallback::{exc}",
-            )
-
-    if cfg.save_discovery_to:
-        save_discovery_snapshot(discovery, cfg.save_discovery_to)
-
-    return discovery
 
 
 def _build_grounding_from_discovery(
