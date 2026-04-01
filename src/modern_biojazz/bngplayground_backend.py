@@ -35,6 +35,11 @@ from .site_graph import ReactionNetwork
 from .simulation import SimulationOptions
 
 
+class BNGLParsingError(Exception):
+    """Exception raised when BNGL parsing fails."""
+    pass
+
+
 @lru_cache(maxsize=16384)
 def _format_rule(name: str, reactants: tuple, products: tuple) -> str:
     """Format and cache the string representation of a reaction rule."""
@@ -79,7 +84,10 @@ class BNGPlaygroundBackend:
 
     def parse_bngl(self, bngl_code: str) -> Dict[str, Any]:
         """Parse BNGL code and return structured model."""
-        return self._call_mcp_tool("parse_bngl", {"code": bngl_code})
+        result = self._call_mcp_tool("parse_bngl", {"bngl": bngl_code})
+        if "error" in result:
+            raise BNGLParsingError(result["error"])
+        return result
 
     def validate_model(self, bngl_code: str) -> Dict[str, Any]:
         """Validate a BNGL model."""
