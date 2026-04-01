@@ -248,12 +248,19 @@ class FitnessEvaluator:
 
 
 @dataclass
-class UltrasensitiveFitnessEvaluator:
-    """Scores dose-response steepness by estimating an effective Hill coefficient."""
-
+class DoseResponseConfig:
     input_species: str
     output_species: str
     doses: tuple[float, ...] = (0.1, 0.3, 1.0, 3.0, 10.0)
+    target_ec50: float = 1.0
+    target_hill: float = 2.0
+
+
+@dataclass
+class UltrasensitiveFitnessEvaluator:
+    """Scores dose-response steepness by estimating an effective Hill coefficient."""
+
+    config: DoseResponseConfig
 
     def score(
         self,
@@ -270,20 +277,20 @@ class UltrasensitiveFitnessEvaluator:
             raise ValueError("UltrasensitiveFitnessEvaluator requires backend and network.")
 
         responses = []
-        for dose in self.doses:
+        for dose in self.config.doses:
             result = backend.simulate(
                 network,
                 SimulationOptions(
                     t_end=t_end,
                     dt=dt,
                     solver=solver,
-                    initial_conditions={self.input_species: dose},
+                    initial_conditions={self.config.input_species: dose},
                 ),
             )
             series = result.get("trajectory", [])
             final = 0.0
             if series:
-                final = float(series[-1].get("species", {}).get(self.output_species, series[-1].get("output", 0.0)))
+                final = float(series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0)))
             responses.append(max(1e-8, final))
 
         lo = responses[0]
@@ -293,8 +300,8 @@ class UltrasensitiveFitnessEvaluator:
 
         y10 = lo + 0.1 * (hi - lo)
         y90 = lo + 0.9 * (hi - lo)
-        d10 = self._interpolate_dose(self.doses, responses, y10)
-        d90 = self._interpolate_dose(self.doses, responses, y90)
+        d10 = self._interpolate_dose(self.config.doses, responses, y10)
+        d90 = self._interpolate_dose(self.config.doses, responses, y90)
         if d10 is None or d90 is None or d10 <= 0 or d90 <= 0:
             return 0.0
         if abs(d90 - d10) <= 1e-9 or d90 / max(1e-12, d10) <= 1.0001:

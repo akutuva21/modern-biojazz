@@ -212,9 +212,13 @@ class LLMEvolutionEngine:
         ]
 
         for generation in range(config.generations):
+            generation_top_scores = []
             for island_idx, island_pop in enumerate(islands):
                 scored = [(self._evaluate(n, config), n) for n in island_pop]
                 scored.sort(key=lambda x: x[0], reverse=True)
+
+                generation_top_scores.extend([s for s, _ in scored[:3]])
+
                 island_best_score, island_best = scored[0]
                 if island_best_score > best_score:
                     best_score = island_best_score
@@ -234,16 +238,14 @@ class LLMEvolutionEngine:
             if hasattr(self.proposer, "record_feedback"):
                 self.proposer.record_feedback(best_score, f"generation={generation+1}")
 
+            generation_top_scores.sort(reverse=True)
             generation_summary.append(
                 GenerationSummary(
                     generation=generation + 1,
                     best_score=best_score,
                     best_n_proteins=len(best.proteins),
                     best_n_rules=len(best.rules),
-                    top_scores=[
-                        s for island in islands
-                        for s, _ in sorted([(self._evaluate(n, config), n) for n in island], key=lambda x: x[0], reverse=True)[:3]
-                    ][:5],
+                    top_scores=generation_top_scores[:5],
                     unique_population=sum(calc_unique_population(island) for island in islands),
                 )
             )

@@ -5,7 +5,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from modern_biojazz.simulation import FitnessEvaluator, LocalCatalystEngine, UltrasensitiveFitnessEvaluator, SimulationOptions
+from modern_biojazz.simulation import (
+    FitnessEvaluator,
+    LocalCatalystEngine,
+    UltrasensitiveFitnessEvaluator,
+    SimulationOptions,
+    DoseResponseConfig,
+)
 
 
 def test_fitness_evaluator_accepts_backend_network(seed_network):
@@ -17,7 +23,8 @@ def test_fitness_evaluator_accepts_backend_network(seed_network):
 
 def test_ultrasensitive_evaluator_matches_unified_interface(seed_network):
     engine = LocalCatalystEngine()
-    evaluator = UltrasensitiveFitnessEvaluator(input_species="STAT3", output_species="SOCS3")
+    config = DoseResponseConfig(input_species="STAT3", output_species="SOCS3")
+    evaluator = UltrasensitiveFitnessEvaluator(config=config)
     score = evaluator.score(backend=engine, network=seed_network, t_end=5.0, dt=1.0)
     assert score >= 0.0
 
