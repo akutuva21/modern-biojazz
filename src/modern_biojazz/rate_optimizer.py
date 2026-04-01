@@ -114,15 +114,7 @@ def optimize_rates(
         seed_rates.append(math.log10(rate))
     population[0] = [max(lb, min(ub, x)) for x in seed_rates]
 
-    def evaluate(log_rates: List[float]) -> float:
-        """Build network with given rates and score it."""
-        candidate = network.copy()
-        for i, idx in enumerate(rate_indices):
-            candidate.rules[idx].rate = 10.0 ** max(lb, min(ub, log_rates[i]))
-        try:
-            return objective(candidate)
-        except Exception:
-            return 0.0
+    evaluate = _make_evaluator(network, rate_indices, lb, ub, objective)
 
     # Evaluate initial population.
     scores = [evaluate(ind) for ind in population]
@@ -207,6 +199,25 @@ def optimize_rates(
         history=history,
     )
     return _build_result(network, rate_indices, state, lb, ub)
+
+
+def _make_evaluator(
+    network: ReactionNetwork,
+    rate_indices: List[int],
+    lb: float,
+    ub: float,
+    objective: Callable[[ReactionNetwork], float],
+) -> Callable[[List[float]], float]:
+    """Create the evaluation function for DE."""
+    def evaluate(log_rates: List[float]) -> float:
+        candidate = network.copy()
+        for i, idx in enumerate(rate_indices):
+            candidate.rules[idx].rate = 10.0 ** max(lb, min(ub, log_rates[i]))
+        try:
+            return objective(candidate)
+        except Exception:
+            return 0.0
+    return evaluate
 
 
 def _build_result(
