@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .utils import save_json_snapshot
+
 
 @dataclass
 class AssemblyResult:
@@ -238,17 +240,15 @@ def load_assembly_snapshot(path: str | Path) -> AssemblyResult:
 
 def save_assembly_snapshot(result: AssemblyResult, path: str | Path) -> None:
     """Save an assembly result for offline use."""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "species": result.species,
-                "statements": result.statements,
-                "bngl_text": result.bngl_text,
-                "source": result.source,
-            },
-            f,
-            indent=2,
-        )
+    save_json_snapshot(
+        {
+            "species": result.species,
+            "statements": result.statements,
+            "bngl_text": result.bngl_text,
+            "source": result.source,
+        },
+        path,
+    )
 
 
 def load_bngl_file(path: str | Path) -> AssemblyResult:

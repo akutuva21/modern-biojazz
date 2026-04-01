@@ -11,6 +11,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Set
 
+from .utils import save_json_snapshot
+
 
 @dataclass
 class PathwayDiscoveryResult:
@@ -158,14 +160,12 @@ def load_discovery_snapshot(path: str) -> PathwayDiscoveryResult:
 
 def save_discovery_snapshot(result: PathwayDiscoveryResult, path: str) -> None:
     """Save a discovery result to JSON for offline/reproducible use."""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "seed_genes": result.seed_genes,
-                "species": result.species,
-                "interactions": result.interactions,
-                "source": result.source,
-            },
-            f,
-            indent=2,
-        )
+    save_json_snapshot(
+        {
+            "seed_genes": result.seed_genes,
+            "species": result.species,
+            "interactions": result.interactions,
+            "source": result.source,
+        },
+        path,
+    )
