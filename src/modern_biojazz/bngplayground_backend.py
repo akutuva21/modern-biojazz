@@ -31,6 +31,11 @@ from typing import Any, Dict, List, Optional
 from .site_graph import ReactionNetwork
 
 
+class BNGLParsingError(Exception):
+    """Exception raised when BNGL parsing fails."""
+    pass
+
+
 @dataclass
 class BNGPlaygroundBackend:
     """Simulation backend that calls the BNG Playground MCP server."""
@@ -68,7 +73,10 @@ class BNGPlaygroundBackend:
 
     def parse_bngl(self, bngl_code: str) -> Dict[str, Any]:
         """Parse BNGL code and return structured model."""
-        return self._call_mcp_tool("parse_bngl", {"code": bngl_code})
+        result = self._call_mcp_tool("parse_bngl", {"bngl": bngl_code})
+        if "error" in result:
+            raise BNGLParsingError(result["error"])
+        return result
 
     def validate_model(self, bngl_code: str) -> Dict[str, Any]:
         """Validate a BNGL model."""
