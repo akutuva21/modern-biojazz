@@ -39,31 +39,9 @@ class ReactionNetwork:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def copy(self) -> "ReactionNetwork":
-        proteins = {
-            pname: Protein(
-                name=p.name,
-                sites=[
-                    Site(
-                        name=s.name,
-                        site_type=s.site_type,
-                        states=list(s.states),
-                        allowed_partners=list(s.allowed_partners),
-                    )
-                    for s in p.sites
-                ],
-            )
-            for pname, p in self.proteins.items()
-        }
-        rules = [
-            Rule(
-                name=r.name,
-                rule_type=r.rule_type,
-                reactants=list(r.reactants),
-                products=list(r.products),
-                rate=r.rate,
-            )
-            for r in self.rules
-        ]
+        # Utilize structural sharing since operators replace objects rather than mutating them.
+        proteins = self.proteins.copy()
+        rules = self.rules.copy()
         return ReactionNetwork(proteins=proteins, rules=rules, metadata=deepcopy(self.metadata))
 
     def validate(self) -> None:

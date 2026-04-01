@@ -4,7 +4,7 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from modern_biojazz.simulation import CatalystHTTPClient, FitnessEvaluator, LocalCatalystEngine
+from modern_biojazz.simulation import CatalystHTTPClient, FitnessEvaluator, LocalCatalystEngine, SimulationOptions
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -31,7 +31,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 def test_local_catalyst_engine_e2e(seed_network):
     engine = LocalCatalystEngine()
-    result = engine.simulate(seed_network, t_end=10.0, dt=1.0, solver="FBDF")
+    result = engine.simulate(seed_network, SimulationOptions(t_end=10.0, dt=1.0, solver="FBDF"))
     score = FitnessEvaluator(target_output=1.0).score(result)
 
     assert result["solver"] in {"BDF", "EulerFallback"}
@@ -46,7 +46,7 @@ def test_http_catalyst_client_e2e(seed_network):
     try:
         base_url = f"http://127.0.0.1:{server.server_port}"
         client = CatalystHTTPClient(base_url)
-        result = client.simulate(seed_network, t_end=8.0, dt=1.0, solver="Rodas5P")
+        result = client.simulate(seed_network, SimulationOptions(t_end=8.0, dt=1.0, solver="Rodas5P"))
         score = FitnessEvaluator(target_output=1.0).score(result)
 
         assert result["solver"] == "Rodas5P"

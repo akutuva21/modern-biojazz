@@ -86,7 +86,7 @@ jobs:
         run: |
           python -c "
           from modern_biojazz.bngl_converter import bngl_to_reaction_network
-          from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator
+          from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator, SimulationOptions
           from pathlib import Path
 
           bngl = Path('tests/fixtures/sample_indra.bngl').read_text()
@@ -95,7 +95,7 @@ jobs:
           assert len(net.rules) >= 4, f'Expected >=4 rules, got {len(net.rules)}'
 
           engine = LocalCatalystEngine()
-          result = engine.simulate(net, t_end=10.0, dt=0.5, solver='BDF')
+          result = engine.simulate(net, SimulationOptions(t_end=10.0, dt=0.5, solver='BDF'))
           assert result['solver'] == 'BDF', f'Expected BDF, got {result[\"solver\"]}'
 
           score = FitnessEvaluator(target_output=1.0).score(simulation_result=result)

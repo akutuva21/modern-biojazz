@@ -3,13 +3,13 @@ from __future__ import annotations
 import time
 
 from modern_biojazz.benchmarking import compare_backends, BenchmarkConfig
-from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator
+from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator, SimulationOptions
 
 
 class SlowLegacyLikeBackend:
-    def simulate(self, network, t_end, dt, solver):
+    def simulate(self, network, options: SimulationOptions):
         time.sleep(0.5)
-        return LocalCatalystEngine().simulate(network, t_end, dt, solver)
+        return LocalCatalystEngine().simulate(network, options)
 
 
 def test_benchmark_compare_backends_e2e(seed_network):

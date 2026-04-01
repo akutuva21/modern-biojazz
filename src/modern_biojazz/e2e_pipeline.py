@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from .bngl_converter import bngl_to_reaction_network
-from .evolution import DeterministicProposer, RandomProposer, EvolutionConfig, EvolutionResult, LLMEvolutionEngine
+from .evolution import RandomProposer, EvolutionConfig, EvolutionResult, LLMEvolutionEngine
 from .grounding import GroundingEngine
 from .indra_assembly import (
     AssemblyResult,
@@ -30,7 +30,7 @@ from .pathway_discovery import (
     load_discovery_snapshot,
     save_discovery_snapshot,
 )
-from .pipeline import ModernBioJazzPipeline, PipelineConfig
+from .pipeline import ModernBioJazzPipeline, PipelineConfig, PipelineResult
 from .rate_optimizer import optimize_rates, DEConfig
 from .simulation import FitnessEvaluator, LocalCatalystEngine, SimulationBackend
 from .site_graph import ReactionNetwork
@@ -121,10 +121,12 @@ def run_e2e(
     # ── Step 5: Build grounding payload from discovery data ──────────
     grounding_payload = _build_grounding_from_discovery(discovery, baseline_network)
 
-    # ── Step 6: Evolve from baseline seed ────────────────────────────
-    evolved_network, evolved_score, evolution_result, grounding_result = _run_evolution(
-        cfg, baseline_network, grounding_payload, evaluator, backend, rng
+    # ── Step 6: Evolve ───────────────────────────────────────────────
+    pipeline_result = _run_evolution(
+        cfg, baseline_network, backend, evaluator, grounding_payload, rng
     )
+    evolved_network = pipeline_result.evolution.best_network
+    evolved_score = pipeline_result.evolution.best_score
 
     # ── Step 7: Rate optimization (optional) ─────────────────────────
     optimized_network, optimized_score = _run_rate_optimization(
@@ -140,11 +142,11 @@ def run_e2e(
         baseline_score=baseline_score,
         evolved_network=evolved_network,
         evolved_score=evolved_score,
-        evolution=evolution_result,
+        evolution=pipeline_result.evolution,
         optimized_network=optimized_network,
         optimized_score=optimized_score,
         improvement=best_score - baseline_score,
-        grounding=grounding_result,
+        grounding=pipeline_result.grounding,
     )
 
 
@@ -152,7 +154,7 @@ def run_e2e(
 
 
 def _run_discovery(cfg: E2EConfig) -> PathwayDiscoveryResult:
-    """Run discovery or load from snapshot."""
+    """Run pathway discovery or load from snapshot."""
     if cfg.discovery_snapshot:
         discovery = load_discovery_snapshot(cfg.discovery_snapshot)
     else:
@@ -220,12 +222,12 @@ def _prepare_baseline_network(cfg: E2EConfig, assembly: AssemblyResult) -> React
 def _run_evolution(
     cfg: E2EConfig,
     baseline_network: ReactionNetwork,
-    grounding_payload: Dict[str, Any],
-    evaluator: FitnessEvaluator,
     backend: SimulationBackend,
-    rng: random.Random
-) -> Tuple[ReactionNetwork, float, EvolutionResult, Any]:
-    """Run the evolution pipeline using an LLM-guided proposer."""
+    evaluator: FitnessEvaluator,
+    grounding_payload: Dict[str, Any] | None,
+    rng: random.Random,
+) -> PipelineResult:
+    """Configure and run the evolution engine."""
     engine = LLMEvolutionEngine(
         simulation_backend=backend,
         fitness_evaluator=evaluator,
@@ -235,7 +237,7 @@ def _run_evolution(
     )
     pipeline = ModernBioJazzPipeline(engine, GroundingEngine())
 
-    pipeline_result = pipeline.run(
+    return pipeline.run(
         seed_network=baseline_network,
         config=PipelineConfig(
             evolution=cfg.evolution,
@@ -244,18 +246,13 @@ def _run_evolution(
         grounding_payload=grounding_payload if cfg.do_grounding else None,
     )
 
-    evolved_network = pipeline_result.evolution.best_network
-    evolved_score = pipeline_result.evolution.best_score
-
-    return evolved_network, evolved_score, pipeline_result.evolution, pipeline_result.grounding
-
 
 def _run_rate_optimization(
     cfg: E2EConfig,
     evolved_network: ReactionNetwork,
     evaluator: FitnessEvaluator,
-    backend: SimulationBackend
-) -> Tuple[Optional[ReactionNetwork], Optional[float]]:
+    backend: SimulationBackend,
+) -> tuple[ReactionNetwork | None, float | None]:
     """Run differential evolution to optimize rate constants if configured."""
     optimized_network = None
     optimized_score = None
