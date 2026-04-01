@@ -23,12 +23,22 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from .site_graph import ReactionNetwork
+
+
+@lru_cache(maxsize=16384)
+def _format_rule(name: str, reactants: tuple, products: tuple) -> str:
+    """Format and cache the string representation of a reaction rule."""
+    reactant_str = " + ".join([r + "()" for r in reactants])
+    product_str = " + ".join([p + "()" for p in products])
+    return f"  {name}: {reactant_str} -> {product_str} {name}_rate"
 
 
 @dataclass
@@ -130,7 +140,7 @@ class BNGPlaygroundBackend:
         try:
             # Try tsx first (TypeScript loader), fall back to compiled JS
             cmd = self._build_command(server_script)
-            proc = subprocess.run(
+            proc = subprocess.run(  # nosec B603
                 cmd,
                 input=stdin_data,
                 capture_output=True,
@@ -152,16 +162,34 @@ class BNGPlaygroundBackend:
 
     def _build_command(self, server_script: str) -> List[str]:
         """Build the command to launch the MCP server."""
+        # Resolve executables to absolute paths to prevent cwd hijacking
+        node_exec = shutil.which(self.node_command)
+        if not node_exec:
+            raise FileNotFoundError(f"Could not find executable for '{self.node_command}'")
+
         # Check if dist/index.js exists (pre-compiled)
         dist_path = os.path.join(
             self.bngplayground_path, "packages", "mcp-server", "dist", "index.js"
         )
         if os.path.exists(dist_path):
-            return [self.node_command, dist_path]
+            return [node_exec, dist_path]
 
         # Fall back to tsx for TypeScript
-        npx = "npx"
-        return [npx, "tsx", server_script]
+        npx_exec = shutil.which("npx")
+        if not npx_exec:
+            raise FileNotFoundError("Could not find executable for 'npx'")
+
+        return [npx_exec, "tsx", server_script]
+
+    def _extract_text_content(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Extract JSON or raw text from the content array of an MCP result."""
+        for item in result.get("content", []):
+            if item.get("type") == "text":
+                try:
+                    return json.loads(item["text"])
+                except (json.JSONDecodeError, TypeError):
+                    return {"raw_text": item.get("text", "")}
+        return None
 
     def _parse_mcp_response(self, stdout: str) -> Dict[str, Any]:
         """Parse the JSON-RPC response(s) from stdout."""
@@ -184,16 +212,10 @@ class BNGPlaygroundBackend:
 
             result = obj["result"]
 
-            # MCP tool results have content[] with text items
-            if not isinstance(result, dict) or "content" not in result:
-                return result
-
-            for item in result.get("content", []):
-                if item.get("type") == "text":
-                    try:
-                        return json.loads(item["text"])
-                    except (json.JSONDecodeError, TypeError):
-                        return {"raw_text": item.get("text", "")}
+            if isinstance(result, dict) and "content" in result:
+                text_content = self._extract_text_content(result)
+                if text_content is not None:
+                    return text_content
 
             return result
 
@@ -253,9 +275,7 @@ class BNGPlaygroundBackend:
         # Rules (simplified — mass action with named parameters)
         lines.append("begin reaction rules")
         for rule in network.rules:
-            reactant_str = " + ".join(f"{r}()" for r in rule.reactants)
-            product_str = " + ".join(f"{p}()" for p in rule.products)
-            lines.append(f"  {rule.name}: {reactant_str} -> {product_str} {rule.name}_rate")
+            lines.append(_format_rule(rule.name, tuple(rule.reactants), tuple(rule.products)))
         lines.append("end reaction rules")
         lines.append("")
 

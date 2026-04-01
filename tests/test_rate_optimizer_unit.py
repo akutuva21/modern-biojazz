@@ -32,7 +32,6 @@ def test_de_improves_on_bad_initial_rates():
 
     result = optimize_rates(
         network=net,
-        backend=backend,
         objective=objective,
         config=DEConfig(max_eval=200, pop_size=10, seed=7),
     )
@@ -51,7 +50,6 @@ def test_de_does_not_mutate_input():
 
     result = optimize_rates(
         network=net,
-        backend=backend,
         objective=lambda n: FitnessEvaluator(1.0).score(backend=backend, network=n, t_end=5.0, dt=1.0),
         config=DEConfig(max_eval=50, pop_size=5, seed=1),
     )
@@ -65,7 +63,6 @@ def test_de_handles_zero_rules():
 
     result = optimize_rates(
         network=net,
-        backend=backend,
         objective=lambda n: 0.0,
         config=DEConfig(max_eval=10, seed=1),
     )
@@ -74,13 +71,26 @@ def test_de_handles_zero_rules():
     assert result.n_eval == 0
 
 
+def test_optimize_rates_empty_network():
+    net = ReactionNetwork(proteins={}, rules=[])
+    backend = LocalCatalystEngine()
+
+    result = optimize_rates(
+        network=net,
+        objective=lambda n: 0.0,
+    )
+
+    assert result.best_network is not net
+    assert result.best_network.proteins == net.proteins
+    assert result.best_network.rules == net.rules
+
+
 def test_de_history_is_monotonic():
     net = _simple_network()
     backend = LocalCatalystEngine()
 
     result = optimize_rates(
         network=net,
-        backend=backend,
         objective=lambda n: FitnessEvaluator(1.0).score(backend=backend, network=n, t_end=5.0, dt=1.0),
         config=DEConfig(max_eval=100, pop_size=8, seed=42),
     )
@@ -99,7 +109,6 @@ def test_de_rates_within_bounds():
 
     result = optimize_rates(
         network=net,
-        backend=backend,
         objective=lambda n: FitnessEvaluator(1.0).score(backend=backend, network=n, t_end=5.0, dt=1.0),
         config=cfg,
     )
