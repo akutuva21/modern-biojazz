@@ -100,37 +100,28 @@ class GraphMutator:
             Rule(name=rname, rule_type="binding", reactants=[a, b], products=[complex_species], rate=rate)
         )
 
-    def add_phosphorylation_rule(self, network: ReactionNetwork, kinase: str, substrate: str, rate: float = 0.2) -> None:
-        if kinase not in network.proteins or substrate not in network.proteins:
+    def _add_simple_rule(self, network: ReactionNetwork, rule_type: str, r1: str, r2: str, p2_suffix: str, rate: float) -> None:
+        if r1 not in network.proteins or r2 not in network.proteins:
             return
-        rname = f"phos_{kinase}_{substrate}_{len(network.rules)+1}"
-        phospho = f"{substrate}_P"
-        self._add_species_if_missing(network, phospho)
+        prefix = "phos" if rule_type == "phosphorylation" else "inh"
+        rname = f"{prefix}_{r1}_{r2}_{len(network.rules)+1}"
+        modified_r2 = f"{r2}{p2_suffix}"
+        self._add_species_if_missing(network, modified_r2)
         network.rules.append(
             Rule(
                 name=rname,
-                rule_type="phosphorylation",
-                reactants=[kinase, substrate],
-                products=[kinase, phospho],
+                rule_type=rule_type,
+                reactants=[r1, r2],
+                products=[r1, modified_r2],
                 rate=rate,
             )
         )
 
+    def add_phosphorylation_rule(self, network: ReactionNetwork, kinase: str, substrate: str, rate: float = 0.2) -> None:
+        self._add_simple_rule(network, "phosphorylation", kinase, substrate, "_P", rate)
+
     def add_inhibition_rule(self, network: ReactionNetwork, inhibitor: str, target: str, rate: float = 0.05) -> None:
-        if inhibitor not in network.proteins or target not in network.proteins:
-            return
-        rname = f"inh_{inhibitor}_{target}_{len(network.rules)+1}"
-        inhibited = f"{target}_inh"
-        self._add_species_if_missing(network, inhibited)
-        network.rules.append(
-            Rule(
-                name=rname,
-                rule_type="inhibition",
-                reactants=[inhibitor, target],
-                products=[inhibitor, inhibited],
-                rate=rate,
-            )
-        )
+        self._add_simple_rule(network, "inhibition", inhibitor, target, "_inh", rate)
 
     def remove_rule(self, network: ReactionNetwork, rule_name: str) -> None:
         network.rules = [r for r in network.rules if r.name != rule_name]
