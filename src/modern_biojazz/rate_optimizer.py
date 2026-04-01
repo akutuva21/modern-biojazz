@@ -41,6 +41,18 @@ class DEConfig:
 
 
 @dataclass
+class DEState:
+    """Internal state for Differential Evolution."""
+    best_x: List[float]
+    best_score: float
+    n_eval: int
+    generations: int
+    converged: bool
+    stop_reason: str
+    history: List[float]
+
+
+@dataclass
 class DEResult:
     """Differential evolution result."""
     best_network: ReactionNetwork
@@ -180,45 +192,51 @@ def optimize_rates(
         prev_best = best_score
 
         if stagnant >= cfg.patience:
-            return _build_result(
-                network, rate_indices, best_x, best_score, n_eval, generation,
-                True, "patience", history, lb, ub,
+            state = DEState(
+                best_x=best_x,
+                best_score=best_score,
+                n_eval=n_eval,
+                generations=generation,
+                converged=True,
+                stop_reason="patience",
+                history=history,
             )
+            return _build_result(network, rate_indices, state, lb, ub)
 
     stop = "converged_f" if stagnant >= cfg.patience else "maxeval"
-    return _build_result(
-        network, rate_indices, best_x, best_score, n_eval, generation,
-        stop == "converged_f", stop, history, lb, ub,
+    state = DEState(
+        best_x=best_x,
+        best_score=best_score,
+        n_eval=n_eval,
+        generations=generation,
+        converged=(stop == "converged_f"),
+        stop_reason=stop,
+        history=history,
     )
+    return _build_result(network, rate_indices, state, lb, ub)
 
 
 def _build_result(
     network: ReactionNetwork,
     rate_indices: List[int],
-    best_x: List[float],
-    best_score: float,
-    n_eval: int,
-    generations: int,
-    converged: bool,
-    stop_reason: str,
-    history: List[float],
+    state: DEState,
     lb: float,
     ub: float,
 ) -> DEResult:
     best_network = network.copy()
     best_rates = []
     for i, idx in enumerate(rate_indices):
-        rate = 10.0 ** max(lb, min(ub, best_x[i]))
+        rate = 10.0 ** max(lb, min(ub, state.best_x[i]))
         best_network.rules[idx].rate = rate
         best_rates.append(rate)
 
     return DEResult(
         best_network=best_network,
         best_rates=best_rates,
-        best_score=best_score,
-        n_eval=n_eval,
-        generations=generations,
-        converged=converged,
-        stop_reason=stop_reason,
-        history=history,
+        best_score=state.best_score,
+        n_eval=state.n_eval,
+        generations=state.generations,
+        converged=state.converged,
+        stop_reason=state.stop_reason,
+        history=state.history,
     )
