@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bngl_converter import bngl_to_reaction_network
 from .evolution import DeterministicProposer, RandomProposer, EvolutionConfig, EvolutionResult, LLMEvolutionEngine
@@ -141,7 +141,7 @@ def run_e2e(
 
     # ── Step 7: Rate optimization (optional) ─────────────────────────
     optimized_network, optimized_score = _run_rate_optimization(
-        cfg, evolved_network, backend, evaluator
+        cfg, evolved_network, evaluator, backend
     )
 
     best_score = optimized_score if optimized_score is not None else evolved_score
@@ -159,12 +159,11 @@ def run_e2e(
         improvement=best_score - baseline_score,
         grounding=pipeline_result.grounding,
     )
-
-
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
 def _run_discovery(cfg: E2EConfig) -> PathwayDiscoveryResult:
+    """Run pathway discovery or load from snapshot."""
     if cfg.discovery_snapshot:
         discovery = load_discovery_snapshot(cfg.discovery_snapshot)
     else:
@@ -186,6 +185,7 @@ def _run_discovery(cfg: E2EConfig) -> PathwayDiscoveryResult:
 
 
 def _run_assembly(cfg: E2EConfig, discovery: PathwayDiscoveryResult) -> AssemblyResult:
+    """Run INDRA assembly or load from BNGL file/snapshot."""
     if cfg.bngl_file:
         assembly = load_bngl_file(cfg.bngl_file)
         assembly.species = discovery.species
@@ -209,6 +209,7 @@ def _run_assembly(cfg: E2EConfig, discovery: PathwayDiscoveryResult) -> Assembly
 
 
 def _prepare_baseline_network(cfg: E2EConfig, assembly: AssemblyResult) -> ReactionNetwork:
+    """Parse BNGL into a ReactionNetwork and configure metadata."""
     baseline_network = bngl_to_reaction_network(assembly.bngl_text)
     baseline_network.metadata["pathway"] = "auto"
     baseline_network.metadata["source"] = assembly.source
@@ -233,6 +234,7 @@ def _run_evolution(
     grounding_payload: Dict[str, Any] | None,
     rng: random.Random,
 ) -> PipelineResult:
+    """Configure and run the evolution engine."""
     engine = LLMEvolutionEngine(
         simulation_backend=backend,
         fitness_evaluator=evaluator,
@@ -255,31 +257,35 @@ def _run_evolution(
 def _run_rate_optimization(
     cfg: E2EConfig,
     evolved_network: ReactionNetwork,
-    backend: SimulationBackend,
     evaluator: FitnessEvaluator,
+    backend: SimulationBackend,
 ) -> tuple[ReactionNetwork | None, float | None]:
-    if not cfg.optimize_rates or not evolved_network.rules:
-        return None, None
+    """Run rate optimization on the evolved network if configured."""
+    optimized_network = None
+    optimized_score = None
 
-    def _objective(candidate: ReactionNetwork) -> float:
-        return evaluator.score(
-            backend=backend,
-            network=candidate,
-            t_end=cfg.sim_t_end,
-            dt=cfg.sim_dt,
+    if cfg.optimize_rates and evolved_network.rules:
+        def _objective(candidate: ReactionNetwork) -> float:
+            return evaluator.score(
+                backend=backend,
+                network=candidate,
+                t_end=cfg.sim_t_end,
+                dt=cfg.sim_dt,
+            )
+
+        de_result = optimize_rates(
+            network=evolved_network,
+            objective=_objective,
+            config=DEConfig(
+                max_eval=cfg.rate_opt_max_eval,
+                pop_size=cfg.rate_opt_pop_size,
+                seed=cfg.random_seed + 1000,
+            ),
         )
+        optimized_network = de_result.best_network
+        optimized_score = de_result.best_score
 
-    de_result = optimize_rates(
-        network=evolved_network,
-        backend=backend,
-        objective=_objective,
-        config=DEConfig(
-            max_eval=cfg.rate_opt_max_eval,
-            pop_size=cfg.rate_opt_pop_size,
-            seed=cfg.random_seed + 1000,
-        ),
-    )
-    return de_result.best_network, de_result.best_score
+    return optimized_network, optimized_score
 
 
 def _build_grounding_from_discovery(

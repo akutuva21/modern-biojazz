@@ -28,7 +28,13 @@ class OmniPathClient:
             method="GET",
         )
         with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            raw_data = response.read(10 * 1024 * 1024)
+            if response.read(1):
+                raise ValueError("OmniPath response payload exceeded 10MB limit")
+            payload = json.loads(raw_data.decode("utf-8"))
+
+        if not isinstance(payload, list):
+            raise TypeError(f"Expected OmniPath payload to be a list, got {type(payload).__name__}")
 
         return payload
 
@@ -52,7 +58,14 @@ class INDRAClient:
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
-            data = json.loads(response.read().decode("utf-8"))
+            raw_data = response.read(10 * 1024 * 1024)
+            if response.read(1):
+                raise ValueError("INDRA response payload exceeded 10MB limit")
+            data = json.loads(raw_data.decode("utf-8"))
+
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected INDRA payload to be a dict, got {type(data).__name__}")
+
         return data.get("statements", [])
 
 
