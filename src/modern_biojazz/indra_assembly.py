@@ -169,59 +169,19 @@ class INDRAAssembler:
             kinase, substrate = agent_names[0], agent_names[1]
 
             if "phosphorylation" in stype:
-                site = _extract_site(stmt) or "phospho"
-                mol_types.setdefault(substrate, {})[site] = ["u", "p"]
-                pname = f"kp_{param_counter}"
-                params[pname] = _extract_belief(stmt) * 0.1
-                rules.append(
-                    f"  r{param_counter}: "
-                    f"{kinase}() + {substrate}({site}~u) -> "
-                    f"{kinase}() + {substrate}({site}~p) {pname}"
-                )
+                _handle_phosphorylation(stmt, param_counter, kinase, substrate, mol_types, params, rules)
 
             elif "dephosphorylation" in stype:
-                site = _extract_site(stmt) or "phospho"
-                mol_types.setdefault(substrate, {})[site] = ["u", "p"]
-                pname = f"kdp_{param_counter}"
-                params[pname] = _extract_belief(stmt) * 0.05
-                rules.append(
-                    f"  r{param_counter}: "
-                    f"{kinase}() + {substrate}({site}~p) -> "
-                    f"{kinase}() + {substrate}({site}~u) {pname}"
-                )
+                _handle_dephosphorylation(stmt, param_counter, kinase, substrate, mol_types, params, rules)
 
             elif "complex" in stype or "bind" in stype:
-                mol_types.setdefault(kinase, {}).setdefault(f"b_{substrate}", [])
-                mol_types.setdefault(substrate, {}).setdefault(f"b_{kinase}", [])
-                pname_f = f"kf_{param_counter}"
-                pname_r = f"kr_{param_counter}"
-                params[pname_f] = _extract_belief(stmt) * 0.01
-                params[pname_r] = 0.1
-                rules.append(
-                    f"  r{param_counter}: "
-                    f"{kinase}(b_{substrate}) + {substrate}(b_{kinase}) <-> "
-                    f"{kinase}(b_{substrate}!1).{substrate}(b_{kinase}!1) {pname_f}, {pname_r}"
-                )
+                _handle_complex(stmt, param_counter, kinase, substrate, mol_types, params, rules)
 
             elif "inhibition" in stype or "decreaseamount" in stype:
-                mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
-                pname = f"ki_{param_counter}"
-                params[pname] = _extract_belief(stmt) * 0.05
-                rules.append(
-                    f"  r{param_counter}: "
-                    f"{kinase}() + {substrate}(activity~active) -> "
-                    f"{kinase}() + {substrate}(activity~inactive) {pname}"
-                )
+                _handle_inhibition(stmt, param_counter, kinase, substrate, mol_types, params, rules)
 
             elif "activation" in stype or "increaseamount" in stype:
-                mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
-                pname = f"ka_{param_counter}"
-                params[pname] = _extract_belief(stmt) * 0.1
-                rules.append(
-                    f"  r{param_counter}: "
-                    f"{kinase}() + {substrate}(activity~inactive) -> "
-                    f"{kinase}() + {substrate}(activity~active) {pname}"
-                )
+                _handle_activation(stmt, param_counter, kinase, substrate, mol_types, params, rules)
 
         return _render_bngl(mol_types, params, rules, species)
 
@@ -350,6 +310,106 @@ class INDRAGraphProposer:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _handle_phosphorylation(
+    stmt: Dict[str, Any],
+    param_counter: int,
+    kinase: str,
+    substrate: str,
+    mol_types: Dict[str, Dict[str, List[str]]],
+    params: Dict[str, float],
+    rules: List[str]
+) -> None:
+    site = _extract_site(stmt) or "phospho"
+    mol_types.setdefault(substrate, {})[site] = ["u", "p"]
+    pname = f"kp_{param_counter}"
+    params[pname] = _extract_belief(stmt) * 0.1
+    rules.append(
+        f"  r{param_counter}: "
+        f"{kinase}() + {substrate}({site}~u) -> "
+        f"{kinase}() + {substrate}({site}~p) {pname}"
+    )
+
+
+def _handle_dephosphorylation(
+    stmt: Dict[str, Any],
+    param_counter: int,
+    kinase: str,
+    substrate: str,
+    mol_types: Dict[str, Dict[str, List[str]]],
+    params: Dict[str, float],
+    rules: List[str]
+) -> None:
+    site = _extract_site(stmt) or "phospho"
+    mol_types.setdefault(substrate, {})[site] = ["u", "p"]
+    pname = f"kdp_{param_counter}"
+    params[pname] = _extract_belief(stmt) * 0.05
+    rules.append(
+        f"  r{param_counter}: "
+        f"{kinase}() + {substrate}({site}~p) -> "
+        f"{kinase}() + {substrate}({site}~u) {pname}"
+    )
+
+
+def _handle_complex(
+    stmt: Dict[str, Any],
+    param_counter: int,
+    kinase: str,
+    substrate: str,
+    mol_types: Dict[str, Dict[str, List[str]]],
+    params: Dict[str, float],
+    rules: List[str]
+) -> None:
+    mol_types.setdefault(kinase, {}).setdefault(f"b_{substrate}", [])
+    mol_types.setdefault(substrate, {}).setdefault(f"b_{kinase}", [])
+    pname_f = f"kf_{param_counter}"
+    pname_r = f"kr_{param_counter}"
+    params[pname_f] = _extract_belief(stmt) * 0.01
+    params[pname_r] = 0.1
+    rules.append(
+        f"  r{param_counter}: "
+        f"{kinase}(b_{substrate}) + {substrate}(b_{kinase}) <-> "
+        f"{kinase}(b_{substrate}!1).{substrate}(b_{kinase}!1) {pname_f}, {pname_r}"
+    )
+
+
+def _handle_inhibition(
+    stmt: Dict[str, Any],
+    param_counter: int,
+    kinase: str,
+    substrate: str,
+    mol_types: Dict[str, Dict[str, List[str]]],
+    params: Dict[str, float],
+    rules: List[str]
+) -> None:
+    mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
+    pname = f"ki_{param_counter}"
+    params[pname] = _extract_belief(stmt) * 0.05
+    rules.append(
+        f"  r{param_counter}: "
+        f"{kinase}() + {substrate}(activity~active) -> "
+        f"{kinase}() + {substrate}(activity~inactive) {pname}"
+    )
+
+
+def _handle_activation(
+    stmt: Dict[str, Any],
+    param_counter: int,
+    kinase: str,
+    substrate: str,
+    mol_types: Dict[str, Dict[str, List[str]]],
+    params: Dict[str, float],
+    rules: List[str]
+) -> None:
+    mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
+    pname = f"ka_{param_counter}"
+    params[pname] = _extract_belief(stmt) * 0.1
+    rules.append(
+        f"  r{param_counter}: "
+        f"{kinase}() + {substrate}(activity~inactive) -> "
+        f"{kinase}() + {substrate}(activity~active) {pname}"
+    )
 
 
 def _extract_site(stmt: Dict[str, Any]) -> Optional[str]:
