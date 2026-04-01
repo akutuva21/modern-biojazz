@@ -82,12 +82,12 @@ def test_bngl_converter_reads_seed_species(fixtures_dir: Path):
 
 def test_bngl_converter_roundtrip_to_simulation(fixtures_dir: Path):
     """Parsed BNGL network can be simulated without errors."""
-    from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator
+    from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator, SimulationOptions
 
     bngl = (fixtures_dir / "sample_indra.bngl").read_text()
     net = bngl_to_reaction_network(bngl)
     engine = LocalCatalystEngine()
-    result = engine.simulate(net, t_end=5.0, dt=1.0, solver="BDF")
+    result = engine.simulate(net, SimulationOptions(t_end=5.0, dt=1.0, solver="BDF"))
     assert len(result["trajectory"]) == 6
     score = FitnessEvaluator(target_output=1.0).score(simulation_result=result)
     assert score >= 0.0

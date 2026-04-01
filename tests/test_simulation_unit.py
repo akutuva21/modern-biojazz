@@ -5,7 +5,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from modern_biojazz.simulation import FitnessEvaluator, LocalCatalystEngine, UltrasensitiveFitnessEvaluator, DoseResponseConfig
+from modern_biojazz.simulation import (
+    FitnessEvaluator,
+    LocalCatalystEngine,
+    UltrasensitiveFitnessEvaluator,
+    SimulationOptions,
+    DoseResponseConfig,
+)
 
 
 def test_fitness_evaluator_accepts_backend_network(seed_network):
@@ -33,7 +39,7 @@ def test_local_engine_euler_fallback_when_scipy_unavailable(seed_network, monkey
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     engine = LocalCatalystEngine()
-    result = engine.simulate(seed_network, t_end=3.0, dt=1.0, solver="Rodas5P")
+    result = engine.simulate(seed_network, SimulationOptions(t_end=3.0, dt=1.0, solver="Rodas5P"))
 
     assert result["solver"] == "EulerFallback"
     assert len(result["trajectory"]) == 4
@@ -65,7 +71,7 @@ def test_local_engine_handles_simulation_error_euler(seed_network, monkeypatch):
     monkeypatch.setattr(builtins, "zip", fake_zip)
 
     engine = LocalCatalystEngine()
-    result = engine.simulate(seed_network, t_end=1.0, dt=1.0)
+    result = engine.simulate(seed_network, SimulationOptions(t_end=1.0, dt=1.0))
 
     assert result["trajectory"] == []
     assert "error" in result["stats"]
@@ -87,7 +93,7 @@ def test_local_engine_handles_simulation_error_scipy(seed_network, monkeypatch):
     monkeypatch.setitem(sys.modules, "scipy.integrate", mock_scipy.integrate)
 
     engine = LocalCatalystEngine()
-    result = engine.simulate(seed_network, t_end=1.0, dt=1.0)
+    result = engine.simulate(seed_network, SimulationOptions(t_end=1.0, dt=1.0))
 
     assert result["trajectory"] == []
     assert "error" in result["stats"]

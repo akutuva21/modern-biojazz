@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 from .site_graph import ReactionNetwork
-from .simulation import SimulationBackend, FitnessScorer
+from .simulation import SimulationBackend, FitnessScorer, SimulationOptions
 
 
 @dataclass
@@ -39,7 +39,12 @@ def benchmark_backend(
     for _ in range(config.runs):
         start = time.perf_counter()
         sim = backend.simulate(
-            network, t_end=config.t_end, dt=config.dt, solver=config.solver
+            network,
+            SimulationOptions(
+                t_end=config.t_end,
+                dt=config.dt,
+                solver=config.solver
+            ),
         )
         durations.append(time.perf_counter() - start)
         scores.append(
