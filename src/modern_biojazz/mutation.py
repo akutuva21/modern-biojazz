@@ -77,13 +77,16 @@ class GraphMutator:
             return
         if any(s.name == site_name for s in protein.sites):
             return
-        protein.sites.append(Site(name=site_name, site_type=site_type, states=["u", "p"] if site_type == "modification" else []))
+        new_sites = list(protein.sites)
+        new_sites.append(Site(name=site_name, site_type=site_type, states=["u", "p"] if site_type == "modification" else []))
+        network.proteins[protein_name] = Protein(name=protein.name, sites=new_sites)
 
     def remove_site(self, network: ReactionNetwork, protein_name: str, site_name: str) -> None:
         protein = network.proteins.get(protein_name)
         if not protein:
             return
-        protein.sites = [s for s in protein.sites if s.name != site_name]
+        new_sites = [s for s in protein.sites if s.name != site_name]
+        network.proteins[protein_name] = Protein(name=protein.name, sites=new_sites)
 
     def add_binding_rule(self, network: ReactionNetwork, a: str, b: str, rate: float = 0.1) -> None:
         if a not in network.proteins or b not in network.proteins:
@@ -174,10 +177,16 @@ class GraphMutator:
         )
 
     def modify_rate(self, network: ReactionNetwork, rule_name: str, multiplier: float) -> None:
-        for r in network.rules:
+        for i, r in enumerate(network.rules):
             if r.name == rule_name:
                 new_rate = r.rate * multiplier
-                r.rate = min(100.0, max(1e-6, new_rate))
+                network.rules[i] = Rule(
+                    name=r.name,
+                    rule_type=r.rule_type,
+                    reactants=r.reactants,
+                    products=r.products,
+                    rate=min(100.0, max(1e-6, new_rate))
+                )
                 return
 
     def duplicate_protein_with_rewiring(self, network: ReactionNetwork, protein_name: str) -> None:
@@ -213,10 +222,23 @@ class GraphMutator:
             protein = network.proteins[p]
             bind_sites = [s for s in protein.sites if s.site_type == "binding"]
             if not bind_sites:
-                protein.sites.append(Site(name=f"b_{partner}", site_type="binding", allowed_partners=[partner]))
+                # Add a new site
+                new_sites = list(protein.sites)
+                new_sites.append(Site(name=f"b_{partner}", site_type="binding", allowed_partners=[partner]))
+                network.proteins[p] = Protein(name=protein.name, sites=new_sites)
             else:
                 if partner not in bind_sites[0].allowed_partners:
-                    bind_sites[0].allowed_partners.append(partner)
+                    # Replace the site rather than mutating allowed_partners in place
+                    new_sites = list(protein.sites)
+                    target_site = bind_sites[0]
+                    new_partners = list(target_site.allowed_partners)
+                    new_partners.append(partner)
+
+                    for i, s in enumerate(new_sites):
+                        if s.name == target_site.name:
+                            new_sites[i] = Site(name=s.name, site_type=s.site_type, states=s.states, allowed_partners=new_partners)
+                            break
+                    network.proteins[p] = Protein(name=protein.name, sites=new_sites)
 
     def add_kinase_cascade(self, network: ReactionNetwork) -> None:
         """Adds a 3-tier kinase cascade A -> B -> C."""

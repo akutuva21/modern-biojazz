@@ -111,9 +111,17 @@ def optimize_rates(
 
     def evaluate(log_rates: List[float]) -> float:
         """Build network with given rates and score it."""
+        from .site_graph import Rule
         candidate = network.copy()
         for i, idx in enumerate(rate_indices):
-            candidate.rules[idx].rate = 10.0 ** max(lb, min(ub, log_rates[i]))
+            r = candidate.rules[idx]
+            candidate.rules[idx] = Rule(
+                name=r.name,
+                rule_type=r.rule_type,
+                reactants=r.reactants,
+                products=r.products,
+                rate=10.0 ** max(lb, min(ub, log_rates[i]))
+            )
         try:
             return objective(candidate)
         except Exception:
@@ -205,11 +213,19 @@ def _build_result(
     lb: float,
     ub: float,
 ) -> DEResult:
+    from .site_graph import Rule
     best_network = network.copy()
     best_rates = []
     for i, idx in enumerate(rate_indices):
         rate = 10.0 ** max(lb, min(ub, best_x[i]))
-        best_network.rules[idx].rate = rate
+        r = best_network.rules[idx]
+        best_network.rules[idx] = Rule(
+            name=r.name,
+            rule_type=r.rule_type,
+            reactants=r.reactants,
+            products=r.products,
+            rate=rate
+        )
         best_rates.append(rate)
 
     return DEResult(
