@@ -204,3 +204,32 @@ def test_crossover():
 
     # Randomly copied nodes from net2
     assert len(child.proteins) > 2
+
+
+def test_add_protein_with_name():
+    mutator = GraphMutator(random.Random(42))
+    network = ReactionNetwork()
+    mutator.add_protein(network, "NEW_PROT")
+    assert "NEW_PROT" in network.proteins
+    assert network.proteins["NEW_PROT"].name == "NEW_PROT"
+    assert network.proteins["NEW_PROT"].sites == []
+
+
+def test_add_protein_without_name():
+    mutator = GraphMutator(random.Random(42))
+    network = ReactionNetwork()
+    mutator.add_protein(network, "A")
+    mutator.add_protein(network)
+    assert "P2" in network.proteins
+    assert network.proteins["P2"].name == "P2"
+    assert network.proteins["P2"].sites == []
+
+
+def test_add_protein_already_exists():
+    mutator = GraphMutator(random.Random(42))
+    network = ReactionNetwork()
+    network.proteins["EXISTING"] = Protein(name="EXISTING", sites=[Site(name="s1", site_type="binding")])
+    mutator.add_protein(network, "EXISTING")
+    assert "EXISTING" in network.proteins
+    assert len(network.proteins["EXISTING"].sites) == 1
+    assert network.proteins["EXISTING"].sites[0].name == "s1"
