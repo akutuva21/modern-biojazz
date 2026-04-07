@@ -126,7 +126,7 @@ def build_grounding_payload_from_sources(
 
     real_nodes = list(real_nodes_map.values())
 
-    for abstract in abstract_types.keys():
+    for abstract in abstract_types:
         for node in real_nodes:
             confidence_by_pair[f"{abstract}->{node['name']}"] = confidence_for_pair(abstract, node["name"])
 
