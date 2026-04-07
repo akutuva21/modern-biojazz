@@ -85,7 +85,7 @@ class GroundingEngine:
         constraints: Dict[str, List[str]],
         real_interactions: List[Tuple[str, str, str]],
     ) -> List[Dict[str, str]]:
-        abstract_nodes = [n for n in network.proteins.keys() if n in constraints]
+        abstract_nodes = [n for n in network.proteins if n in constraints]
         edge_types = {
             (r.reactants[0], r.reactants[-1], self._normalize_edge_type(r.rule_type))
             for r in network.rules
