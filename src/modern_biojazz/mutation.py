@@ -277,10 +277,12 @@ class GraphMutator:
             return True
 
         # Copy over rules whose proteins are present in child
+        existing_rule_names = {r.name for r in child.rules}
         for rule in net2.rules:
             if self.rng.random() < 0.5 and all_bases_present(rule.reactants) and all_bases_present(rule.products):
-                if not any(r.name == rule.name for r in child.rules):
+                if rule.name not in existing_rule_names:
                     child.rules.append(copy.deepcopy(rule))
+                    existing_rule_names.add(rule.name)
 
         return child
 
