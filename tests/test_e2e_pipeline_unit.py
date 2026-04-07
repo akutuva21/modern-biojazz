@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 
 from modern_biojazz.bngl_converter import bngl_to_reaction_network, _parse_parameters
-from modern_biojazz.e2e_pipeline import run_e2e, E2EConfig, _fallback_assembly
+from unittest.mock import patch
+
+from modern_biojazz.e2e_pipeline import run_e2e, E2EConfig, _fallback_assembly, _run_discovery
 from modern_biojazz.indra_assembly import load_bngl_file
 from modern_biojazz.pathway_discovery import (
     PathwayDiscoveryResult,
@@ -94,6 +96,22 @@ def test_bngl_converter_roundtrip_to_simulation(fixtures_dir: Path):
 
 
 # ── Pathway discovery snapshots ──────────────────────────────────────
+
+
+def test_run_discovery_offline_fallback():
+    """Test that _run_discovery correctly falls back to seed genes when OmniPath raises an Exception."""
+    config = E2EConfig(seed_genes=["A", "B", "C"])
+
+    with patch("modern_biojazz.e2e_pipeline.OmniPathDiscovery.discover") as mock_discover:
+        mock_discover.side_effect = Exception("offline test")
+
+        result = _run_discovery(config)
+
+        assert mock_discover.called
+        assert result.seed_genes == ["A", "B", "C"]
+        assert result.species == ["A", "B", "C"]
+        assert result.interactions == []
+        assert result.source == "fallback::offline test"
 
 
 def test_discovery_snapshot_roundtrip(fixtures_dir: Path, tmp_path: Path):
