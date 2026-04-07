@@ -274,3 +274,105 @@ def test_duplicate_protein_missing_protein():
 
     assert len(net.proteins) == 1
     assert "A" in net.proteins
+
+
+def test_random_add_site(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    initial_sites = sum(len(p.sites) for p in net.proteins.values())
+    mutator.random_add_site(net)
+    new_sites = sum(len(p.sites) for p in net.proteins.values())
+    assert new_sites == initial_sites + 1
+
+
+def test_random_bind(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    initial_rules = len(net.rules)
+    mutator.random_bind(net)
+    assert len(net.rules) == initial_rules + 1
+    assert any(r.rule_type == "binding" for r in net.rules)
+
+
+def test_random_phos(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    initial_rules = len(net.rules)
+    mutator.random_phos(net)
+    assert len(net.rules) == initial_rules + 1
+    assert any(r.rule_type == "phosphorylation" for r in net.rules)
+
+
+def test_random_inhibit(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    initial_rules = len(net.rules)
+    mutator.random_inhibit(net)
+    assert len(net.rules) == initial_rules + 1
+    assert any(r.rule_type == "inhibition" for r in net.rules)
+
+
+def test_random_remove_rule(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    initial_rules = len(net.rules)
+    mutator.random_remove_rule(net)
+    assert len(net.rules) == initial_rules - 1
+
+
+def test_random_modify_rate(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    initial_rate = net.rules[0].rate
+    mutator.random_modify_rate(net)
+    new_rate = net.rules[0].rate
+    assert new_rate != initial_rate
+
+
+def test_random_remove_site(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    # Add a site first to ensure there's one to remove
+    mutator.random_add_site(net)
+    initial_sites = sum(len(p.sites) for p in net.proteins.values())
+    mutator.random_remove_site(net)
+    new_sites = sum(len(p.sites) for p in net.proteins.values())
+    assert new_sites == initial_sites - 1
+
+
+def test_random_duplicate(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    initial_proteins = len(net.proteins)
+    mutator.random_duplicate(net)
+    assert len(net.proteins) > initial_proteins
+
+
+def test_random_remove_protein(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    initial_proteins = len(net.proteins)
+    mutator.random_remove_protein(net)
+    assert len(net.proteins) == initial_proteins - 1
+
+
+def test_random_dephos(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    # Add phosphorylation first to have something to dephosphorylate
+    mutator.random_phos(net)
+    initial_rules = len(net.rules)
+    mutator.random_dephos(net)
+    assert len(net.rules) == initial_rules + 1
+    assert any(r.rule_type == "dephosphorylation" for r in net.rules)
+
+
+def test_random_unbind(seed_network):
+    mutator = GraphMutator(random.Random(42))
+    net = seed_network.copy()
+    # Add binding first to have something to unbind
+    mutator.random_bind(net)
+    initial_rules = len(net.rules)
+    mutator.random_unbind(net)
+    assert len(net.rules) == initial_rules + 1
+    assert any(r.rule_type == "unbinding" for r in net.rules)
