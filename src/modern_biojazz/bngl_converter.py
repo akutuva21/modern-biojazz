@@ -8,6 +8,7 @@ use an ANTLR4 grammar.  It covers:
   - begin/end seed species blocks
   - begin/end reaction rules blocks (forward-only and reversible)
 """
+
 from __future__ import annotations
 
 import re
@@ -66,11 +67,16 @@ def bngl_to_reaction_network(
 # ── Block extraction ─────────────────────────────────────────────────
 
 
+_BLOCK_PATTERNS: Dict[str, re.Pattern] = {}
+
+
 def _extract_block(text: str, block_name: str) -> str:
-    pattern = re.compile(
-        rf"begin\s+{block_name}\s*\n(.*?)end\s+{block_name}",
-        re.DOTALL | re.IGNORECASE,
-    )
+    if block_name not in _BLOCK_PATTERNS:
+        _BLOCK_PATTERNS[block_name] = re.compile(
+            rf"begin\s+{block_name}\s*\n(.*?)end\s+{block_name}",
+            re.DOTALL | re.IGNORECASE,
+        )
+    pattern = _BLOCK_PATTERNS[block_name]
     m = pattern.search(text)
     return m.group(1).strip() if m else ""
 
@@ -212,7 +218,6 @@ def _parse_reaction_rules(text: str, params: Dict[str, float]) -> List[Rule]:
         # Walk backwards to find where rates start.
         # For reversible: "A().B() kf, kr" → rates = ["kf,", "kr"] or "kf", "kr"
         # For forward: "A().B() kf" → rates = ["kf"]
-        found_plus = False
         for tok in reversed(rhs_tokens):
             tok_clean = tok.strip(",")
             if _is_rate_token(tok_clean, params):
@@ -304,7 +309,8 @@ def _state_qualified_name(pattern: str) -> str:
     m = re.match(r"(\w+)\(([^)]*)\)", pattern)
     if not m:
         # Bare name or malformed
-        return re.match(r"(\w+)", pattern).group(1) if re.match(r"(\w+)", pattern) else ""
+        bare_match = re.match(r"(\w+)", pattern)
+        return bare_match.group(1) if bare_match else ""
 
     mol_name = m.group(1)
     sites_str = m.group(2).strip()
