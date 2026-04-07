@@ -174,22 +174,16 @@ def plot_parameter_trajectory(
     return fig
 
 
-def plot_network_topology(network: ReactionNetwork, title: str = "Evolved Network Topology") -> plt.Figure:
+def build_networkx_graph(network: ReactionNetwork) -> nx.MultiDiGraph:
     """
-    Plots the network graph of a ReactionNetwork (Figure 5A analog).
+    Constructs a NetworkX graph from a ReactionNetwork for plotting.
     Nodes are proteins. Edges are interactions (rules).
-    Edge colors:
-      - black: binding
-      - red: phosphorylation
-      - blue: dephosphorylation
-      - gray: other
 
     Args:
         network: ReactionNetwork object.
-        title: Title of the plot.
 
     Returns:
-        plt.Figure
+        nx.MultiDiGraph: The constructed network graph.
     """
     G = nx.MultiDiGraph()
 
@@ -238,6 +232,28 @@ def plot_network_topology(network: ReactionNetwork, title: str = "Evolved Networ
 
         if src in G.nodes and target in G.nodes:
             G.add_edge(src, target, color=edge_color, rule_type=rule.rule_type)
+
+    return G
+
+
+def plot_network_topology(network: ReactionNetwork, title: str = "Evolved Network Topology") -> plt.Figure:
+    """
+    Plots the network graph of a ReactionNetwork (Figure 5A analog).
+    Nodes are proteins. Edges are interactions (rules).
+    Edge colors:
+      - black: binding
+      - red: phosphorylation
+      - blue: dephosphorylation
+      - gray: other
+
+    Args:
+        network: ReactionNetwork object.
+        title: Title of the plot.
+
+    Returns:
+        plt.Figure
+    """
+    G = build_networkx_graph(network)
 
     fig, ax = plt.subplots(figsize=(7, 6))
 
