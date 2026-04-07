@@ -181,81 +181,87 @@ def _parse_reaction_rules(text: str, params: Dict[str, float]) -> List[Rule]:
             continue
 
         counter += 1
+        rules.extend(_parse_single_rule(line, counter, params))
 
-        # Strip optional rule label: "r1: ..."
-        if ":" in line and not line.startswith("("):
-            label_part, _, line = line.partition(":")
-            rule_name = label_part.strip()
-            line = line.strip()
+    return rules
+
+
+def _parse_single_rule(line: str, counter: int, params: Dict[str, float]) -> List[Rule]:
+    rules: List[Rule] = []
+
+    # Strip optional rule label: "r1: ..."
+    if ":" in line and not line.startswith("("):
+        label_part, _, line = line.partition(":")
+        rule_name = label_part.strip()
+        line = line.strip()
+    else:
+        rule_name = f"rule_{counter}"
+
+    # Detect reversible (<->) vs forward-only (->)
+    if "<->" in line:
+        lhs, _, rhs_and_rates = line.partition("<->")
+        reversible = True
+    elif "->" in line:
+        lhs, _, rhs_and_rates = line.partition("->")
+        reversible = False
+    else:
+        return rules
+
+    # Split RHS into products and rate(s)
+    # Products end where the rate parameters begin (last 1 or 2 tokens).
+    rhs_tokens = rhs_and_rates.strip().split()
+    if not rhs_tokens:
+        return rules
+
+    # Rate parameters are the rightmost tokens that look like numbers or param names.
+    rate_tokens: List[str] = []
+    product_tokens: List[str] = []
+    # Walk backwards to find where rates start.
+    # For reversible: "A().B() kf, kr" → rates = ["kf,", "kr"] or "kf", "kr"
+    # For forward: "A().B() kf" → rates = ["kf"]
+    for tok in reversed(rhs_tokens):
+        tok_clean = tok.strip(",")
+        if _is_rate_token(tok_clean, params):
+            rate_tokens.insert(0, tok)
         else:
-            rule_name = f"rule_{counter}"
+            product_tokens = rhs_tokens[: rhs_tokens.index(tok) + 1]
+            break
 
-        # Detect reversible (<->) vs forward-only (->)
-        if "<->" in line:
-            lhs, _, rhs_and_rates = line.partition("<->")
-            reversible = True
-        elif "->" in line:
-            lhs, _, rhs_and_rates = line.partition("->")
-            reversible = False
-        else:
-            continue
+    if not product_tokens:
+        # All tokens were rates — the last non-rate must be a product
+        product_tokens = rhs_tokens[:1]
+        rate_tokens = rhs_tokens[1:]
 
-        # Split RHS into products and rate(s)
-        # Products end where the rate parameters begin (last 1 or 2 tokens).
-        rhs_tokens = rhs_and_rates.strip().split()
-        if not rhs_tokens:
-            continue
+    product_str = " ".join(product_tokens)
 
-        # Rate parameters are the rightmost tokens that look like numbers or param names.
-        rate_tokens: List[str] = []
-        product_tokens: List[str] = []
-        # Walk backwards to find where rates start.
-        # For reversible: "A().B() kf, kr" → rates = ["kf,", "kr"] or "kf", "kr"
-        # For forward: "A().B() kf" → rates = ["kf"]
-        found_plus = False
-        for tok in reversed(rhs_tokens):
-            tok_clean = tok.strip(",")
-            if _is_rate_token(tok_clean, params):
-                rate_tokens.insert(0, tok)
-            else:
-                product_tokens = rhs_tokens[: rhs_tokens.index(tok) + 1]
-                break
+    reactant_mols = _extract_mol_names(lhs.strip())
+    product_mols = _extract_mol_names(product_str)
+    rates = _resolve_rates(rate_tokens, params)
 
-        if not product_tokens:
-            # All tokens were rates — the last non-rate must be a product
-            product_tokens = rhs_tokens[:1]
-            rate_tokens = rhs_tokens[1:]
+    fwd_rate = rates[0] if rates else 0.01
+    rule_type = _infer_rule_type(lhs.strip(), product_str, reactant_mols, product_mols)
 
-        product_str = " ".join(product_tokens)
+    rules.append(
+        Rule(
+            name=rule_name,
+            rule_type=rule_type,
+            reactants=reactant_mols,
+            products=product_mols,
+            rate=fwd_rate,
+        )
+    )
 
-        reactant_mols = _extract_mol_names(lhs.strip())
-        product_mols = _extract_mol_names(product_str)
-        rates = _resolve_rates(rate_tokens, params)
-
-        fwd_rate = rates[0] if rates else 0.01
-        rule_type = _infer_rule_type(lhs.strip(), product_str, reactant_mols, product_mols)
-
+    if reversible and len(rates) >= 2:
+        rev_type = _reverse_rule_type(rule_type)
         rules.append(
             Rule(
-                name=rule_name,
-                rule_type=rule_type,
-                reactants=reactant_mols,
-                products=product_mols,
-                rate=fwd_rate,
+                name=f"{rule_name}_rev",
+                rule_type=rev_type,
+                reactants=product_mols,
+                products=reactant_mols,
+                rate=rates[1],
             )
         )
-
-        if reversible and len(rates) >= 2:
-            rev_type = _reverse_rule_type(rule_type)
-            rules.append(
-                Rule(
-                    name=f"{rule_name}_rev",
-                    rule_type=rev_type,
-                    reactants=product_mols,
-                    products=reactant_mols,
-                    rate=rates[1],
-                )
-            )
 
     return rules
 
