@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from modern_biojazz.bngplayground_backend import BNGPlaygroundBackend, BNGLParsingError
 from modern_biojazz.site_graph import ReactionNetwork, Protein, Site, Rule
 

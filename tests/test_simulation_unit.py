@@ -1,9 +1,7 @@
-from __future__ import annotations
 
 import builtins
 from unittest.mock import MagicMock
 
-import pytest
 
 from modern_biojazz.simulation import (
     FitnessEvaluator,

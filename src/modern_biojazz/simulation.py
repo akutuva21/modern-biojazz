@@ -1,10 +1,9 @@
-from __future__ import annotations
 
 import json
 import math
 import time
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Protocol
 
 from .site_graph import ReactionNetwork

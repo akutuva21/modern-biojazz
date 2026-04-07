@@ -7,7 +7,6 @@ Usage from Python:
   from modern_biojazz.e2e_pipeline import run_e2e
   result = run_e2e(seed_genes=["IL6", "STAT3", "TGFB1", "SMAD3"])
 """
-from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field

@@ -20,14 +20,12 @@ Usage:
     options = SimulationOptions(t_end=20.0, dt=1.0, solver="cvode")
     result = backend.simulate(network, options)
 """
-from __future__ import annotations
 
 import json
 import os
 import shutil
 import subprocess
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
@@ -160,7 +158,7 @@ class BNGPlaygroundBackend:
             )
         except FileNotFoundError:
             raise RuntimeError(
-                f"Could not find node/tsx. Ensure Node.js is installed."
+                "Could not find node/tsx. Ensure Node.js is installed."
             )
 
         if proc.returncode != 0:
@@ -300,7 +298,7 @@ class BNGPlaygroundBackend:
         lines.extend([
             "end model",
             "",
-            f"generate_network({{max_iter=>100}})",
+            "generate_network({max_iter=>100})",
             f"simulate({{method=>\"ode\", t_end=>{t_end}, n_steps=>{max(1, int(t_end/dt))}}})"
         ])
 

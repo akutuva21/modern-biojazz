@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from modern_biojazz.llm_proposer import OpenAICompatibleProposer, SafeActionFilterProposer, LLMDenoisingProposer
 from unittest.mock import patch, MagicMock

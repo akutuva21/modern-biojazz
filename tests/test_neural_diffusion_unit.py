@@ -1,5 +1,4 @@
 import torch
-import pytest
 from modern_biojazz.neural_diffusion import SimpleContactMapDenoiser, DDPMContactMapTrainer
 from modern_biojazz.site_graph import ReactionNetwork, Protein, Rule
 

@@ -1,13 +1,10 @@
-from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from modern_biojazz.bngl_converter import bngl_to_reaction_network, _parse_parameters
 from modern_biojazz.e2e_pipeline import run_e2e, E2EConfig, _fallback_assembly
 from modern_biojazz.indra_assembly import load_bngl_file
 from modern_biojazz.pathway_discovery import (
-    PathwayDiscoveryResult,
     load_discovery_snapshot,
     save_discovery_snapshot,
 )

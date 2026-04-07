@@ -3,7 +3,6 @@ Plotting utilities to generate manuscript-quality figures for modern_biojazz.
 Designed to mimic and modernize figures from the original BioJazz paper (Feng et al. 2015).
 """
 
-from __future__ import annotations
 
 import os
 from typing import List, Dict, Any, Optional

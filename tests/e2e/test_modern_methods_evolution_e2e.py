@@ -6,7 +6,7 @@ import json
 from modern_biojazz.evolution import LLMEvolutionEngine, EvolutionConfig
 from modern_biojazz.mutation import GraphMutator
 from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator
-from modern_biojazz.site_graph import ReactionNetwork, Protein
+from modern_biojazz.site_graph import ReactionNetwork
 
 from modern_biojazz.indra_assembly import INDRAGraphProposer
 from modern_biojazz.llm_proposer import LLMDenoisingProposer, OpenAICompatibleProposer
