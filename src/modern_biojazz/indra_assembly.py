@@ -7,6 +7,7 @@ Two modes:
 from __future__ import annotations
 
 import json
+import logging
 import urllib.request
 import random
 from dataclasses import dataclass, field
@@ -14,6 +15,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .utils import save_json_snapshot
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -238,8 +241,8 @@ class INDRAGraphProposer:
             if m:
                 raw = m.group(1).replace("'", "").replace('"', "").split(",")
                 proteins = [p.strip() for p in raw if p.strip() and not p.strip().startswith("M_")]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to parse proteins from model_code: %s", e)
 
         if not proteins:
             # Fallback to random actions if no proteins found
