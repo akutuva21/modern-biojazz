@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from modern_biojazz.grounding import GroundingEngine
 

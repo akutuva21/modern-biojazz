@@ -3,7 +3,6 @@
 Provides the species enumeration step for the end-to-end pipeline:
   pathway query → species set → INDRA assembly → BNGL → evolution
 """
-from __future__ import annotations
 
 import json
 import urllib.parse

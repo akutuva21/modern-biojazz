@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 from modern_biojazz.rate_optimizer import optimize_rates, DEConfig
 from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator

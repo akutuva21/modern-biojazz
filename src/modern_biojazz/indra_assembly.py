@@ -4,7 +4,6 @@ Two modes:
   1. Live: query INDRA DB REST API (no key needed) → statements → BNGL text
   2. Offline: load pre-assembled BNGL from file
 """
-from __future__ import annotations
 
 import json
 import urllib.request

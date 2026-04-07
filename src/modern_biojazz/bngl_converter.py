@@ -8,7 +8,6 @@ use an ANTLR4 grammar.  It covers:
   - begin/end seed species blocks
   - begin/end reaction rules blocks (forward-only and reversible)
 """
-from __future__ import annotations
 
 import re
 from typing import Dict, List, Optional, Tuple

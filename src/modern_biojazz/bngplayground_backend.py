@@ -20,7 +20,6 @@ Usage:
     options = SimulationOptions(t_end=20.0, dt=1.0, solver="cvode")
     result = backend.simulate(network, options)
 """
-from __future__ import annotations
 
 import json
 import os
