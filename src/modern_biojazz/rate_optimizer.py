@@ -101,22 +101,51 @@ def optimize_rates(
     lb = cfg.log10_lower
     ub = cfg.log10_upper
 
-    # Initialize population in log10 space.
+    population = _initialize_population(
+        network, rate_indices, pop_size, n_dim, lb, ub, rng
+    )
+
+    evaluate = _make_evaluator(network, rate_indices, lb, ub, objective)
+
+    state = _run_de_loop(population, n_dim, pop_size, lb, ub, cfg, rng, evaluate)
+
+    return _build_result(network, rate_indices, state, lb, ub)
+
+
+def _initialize_population(
+    network: ReactionNetwork,
+    rate_indices: List[int],
+    pop_size: int,
+    n_dim: int,
+    lb: float,
+    ub: float,
+    rng: random.Random,
+) -> List[List[float]]:
+    """Initialize population in log10 space with seed from current rates."""
     population: List[List[float]] = []
     for _ in range(pop_size):
         individual = [rng.uniform(lb, ub) for _ in range(n_dim)]
         population.append(individual)
 
-    # Seed the first individual with the current rates (in log10).
     seed_rates = []
     for idx in rate_indices:
         rate = max(1e-12, network.rules[idx].rate)
         seed_rates.append(math.log10(rate))
     population[0] = [max(lb, min(ub, x)) for x in seed_rates]
+    return population
 
-    evaluate = _make_evaluator(network, rate_indices, lb, ub, objective)
 
-    # Evaluate initial population.
+def _run_de_loop(
+    population: List[List[float]],
+    n_dim: int,
+    pop_size: int,
+    lb: float,
+    ub: float,
+    cfg: DEConfig,
+    rng: random.Random,
+    evaluate: Callable[[List[float]], float],
+) -> DEState:
+    """Run the main Differential Evolution loop."""
     scores = [evaluate(ind) for ind in population]
     n_eval = pop_size
 
@@ -136,24 +165,9 @@ def optimize_rates(
             if n_eval >= cfg.max_eval:
                 break
 
-            # DE/rand/1/bin: pick 3 distinct individuals ≠ i.
-            candidates = [j for j in range(pop_size) if j != i]
-            a, b, c = rng.sample(candidates, 3)
-
-            # Mutation.
-            mutant = [
-                population[a][d] + cfg.F * (population[b][d] - population[c][d])
-                for d in range(n_dim)
-            ]
-            # Clamp to bounds.
-            mutant = [max(lb, min(ub, m)) for m in mutant]
-
-            # Binomial crossover.
-            j_rand = rng.randint(0, n_dim - 1)
-            trial = [
-                mutant[d] if (rng.random() < cfg.CR or d == j_rand) else population[i][d]
-                for d in range(n_dim)
-            ]
+            trial = _mutate_and_crossover(
+                i, population, n_dim, pop_size, lb, ub, cfg, rng
+            )
 
             trial_score = evaluate(trial)
             n_eval += 1
@@ -177,7 +191,7 @@ def optimize_rates(
         prev_best = best_score
 
         if stagnant >= cfg.patience:
-            state = DEState(
+            return DEState(
                 best_x=best_x,
                 best_score=best_score,
                 n_eval=n_eval,
@@ -186,10 +200,9 @@ def optimize_rates(
                 stop_reason="patience",
                 history=history,
             )
-            return _build_result(network, rate_indices, state, lb, ub)
 
     stop = "converged_f" if stagnant >= cfg.patience else "maxeval"
-    state = DEState(
+    return DEState(
         best_x=best_x,
         best_score=best_score,
         n_eval=n_eval,
@@ -198,7 +211,38 @@ def optimize_rates(
         stop_reason=stop,
         history=history,
     )
-    return _build_result(network, rate_indices, state, lb, ub)
+
+
+def _mutate_and_crossover(
+    i: int,
+    population: List[List[float]],
+    n_dim: int,
+    pop_size: int,
+    lb: float,
+    ub: float,
+    cfg: DEConfig,
+    rng: random.Random,
+) -> List[float]:
+    """Generate a trial vector using DE/rand/1/bin."""
+    # DE/rand/1/bin: pick 3 distinct individuals ≠ i.
+    candidates = [j for j in range(pop_size) if j != i]
+    a, b, c = rng.sample(candidates, 3)
+
+    # Mutation.
+    mutant = [
+        population[a][d] + cfg.F * (population[b][d] - population[c][d])
+        for d in range(n_dim)
+    ]
+    # Clamp to bounds.
+    mutant = [max(lb, min(ub, m)) for m in mutant]
+
+    # Binomial crossover.
+    j_rand = rng.randint(0, n_dim - 1)
+    trial = [
+        mutant[d] if (rng.random() < cfg.CR or d == j_rand) else population[i][d]
+        for d in range(n_dim)
+    ]
+    return trial
 
 
 def _make_evaluator(

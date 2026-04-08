@@ -91,7 +91,7 @@ class LLMEvolutionEngine:
         for r in network.rules:
             rule_types[r.rule_type] = rule_types.get(r.rule_type, 0) + 1
 
-        protein_names = sorted(network.proteins.keys())
+        protein_names = sorted(network.proteins)
         preview_rules = []
         for r in network.rules[: min(20, len(network.rules))]:
             left = "+".join(r.reactants)
@@ -147,7 +147,7 @@ class LLMEvolutionEngine:
         return network.copy()
 
     def _network_fingerprint(self, network: ReactionNetwork) -> str:
-        proteins = sorted(network.proteins.keys())
+        proteins = sorted(network.proteins)
         rules = sorted(
             [f"{r.rule_type}:{'+'.join(r.reactants)}->{'+'.join(r.products)}@{r.rate:.6g}" for r in network.rules]
         )

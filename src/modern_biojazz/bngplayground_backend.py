@@ -58,8 +58,21 @@ class BNGPlaygroundBackend:
     _request_id: int = 0
 
     def __post_init__(self) -> None:
+        if self.node_command not in ["node", "nodejs"]:
+            raise ValueError(f"node_command must be 'node' or 'nodejs', got: '{self.node_command}'")
+
         if not self.bngplayground_path:
             self.bngplayground_path = os.environ.get("BNGPLAYGROUND_PATH", "")
+
+        if self.bngplayground_path:
+            self.bngplayground_path = os.path.abspath(self.bngplayground_path)
+            if not os.path.isdir(self.bngplayground_path):
+                raise ValueError(f"BNGPLAYGROUND_PATH is not a valid directory: {self.bngplayground_path}")
+
+            # Additional validation to ensure it points to the expected repository
+            expected_mcp_server_dir = os.path.join(self.bngplayground_path, "packages", "mcp-server")
+            if not os.path.isdir(expected_mcp_server_dir):
+                raise ValueError(f"BNGPLAYGROUND_PATH does not appear to be the bngplayground repository root (missing {expected_mcp_server_dir})")
 
     def simulate(
         self,
@@ -147,7 +160,6 @@ class BNGPlaygroundBackend:
         stdin_data = init_msg + "\n" + tool_msg + "\n"
 
         try:
-            # Try tsx first (TypeScript loader), fall back to compiled JS
             cmd = self._build_command(server_script)
             proc = subprocess.run(  # nosec B603
                 cmd,
@@ -183,12 +195,10 @@ class BNGPlaygroundBackend:
         if os.path.exists(dist_path):
             return [node_exec, dist_path]
 
-        # Fall back to tsx for TypeScript
-        npx_exec = shutil.which("npx")
-        if not npx_exec:
-            raise FileNotFoundError("Could not find executable for 'npx'")
-
-        return [npx_exec, "tsx", server_script]
+        raise FileNotFoundError(
+            f"Could not find compiled MCP server at {dist_path}. "
+            "Ensure you have run 'npm install' and built the project."
+        )
 
     def _extract_text_content(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Extract JSON or raw text from the content array of an MCP result."""
@@ -268,10 +278,10 @@ class BNGPlaygroundBackend:
 
     def _generate_rules(self, network: ReactionNetwork) -> List[str]:
         lines = ["begin reaction rules"]
-        for rule in network.rules:
-            reactant_str = " + ".join(f"{r}()" for r in rule.reactants)
-            product_str = " + ".join(f"{p}()" for p in rule.products)
-            lines.append(f"  {rule.name}: {reactant_str} -> {product_str} {rule.name}_rate")
+        lines.extend(
+            f"  {rule.name}: {' + '.join([f'{r}()' for r in rule.reactants])} -> {' + '.join([f'{p}()' for p in rule.products])} {rule.name}_rate"
+            for rule in network.rules
+        )
         lines.extend(["end reaction rules", ""])
         return lines
 

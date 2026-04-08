@@ -217,3 +217,26 @@ def test_evolution_generation_summary_includes_top_scores():
     assert isinstance(result.evolution.generation_summary[0].unique_population, int)
     assert result.evolution.generation_summary[0].unique_population >= 1
 
+
+# ── Printing summaries ────────────────────────────────────────────────
+
+
+def test_print_e2e_summary_basic(capsys):
+    from unittest.mock import Mock
+    from modern_biojazz.e2e_pipeline import print_e2e_summary
+
+    mock_result = Mock()
+    mock_result.config.seed_genes = ["A", "B"]
+    mock_result.discovery.source = "test_disc"
+    mock_result.discovery.species = ["A", "B"]
+    mock_result.discovery.interactions = [{"source_genesymbol": "A", "target_genesymbol": "B"}]
+    mock_result.assembly.source = "test_assem"
+
+    print_e2e_summary(mock_result)
+    captured = capsys.readouterr()
+
+    assert "E2E Pipeline Summary" in captured.out
+    assert "Seed genes:       ['A', 'B']" in captured.out
+    assert "Discovery source: test_disc" in captured.out
+    assert "Discovered ops:   2 species, 1 interactions" in captured.out
+    assert "Assembly source:  test_assem" in captured.out
