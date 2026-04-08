@@ -12,7 +12,7 @@ authors = [{name = "BioJazz Modernization"}]
 dependencies = ["scipy>=1.10", "torch>=2.0.0"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "matplotlib", "seaborn", "networkx", "pandas"]
 
 [project.scripts]
 modern-biojazz = "modern_biojazz.cli:main"
