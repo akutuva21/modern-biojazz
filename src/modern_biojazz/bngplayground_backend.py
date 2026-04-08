@@ -61,6 +61,12 @@ class BNGPlaygroundBackend:
         if not self.bngplayground_path:
             self.bngplayground_path = os.environ.get("BNGPLAYGROUND_PATH", "")
 
+        # Strict validation of node_command to prevent arbitrary command execution
+        if self.node_command not in ("node", "nodejs"):
+            raise ValueError(
+                f"Invalid node_command: {self.node_command}. Only 'node' and 'nodejs' are allowed."
+            )
+
     def simulate(
         self,
         network: ReactionNetwork,
@@ -115,6 +121,11 @@ class BNGPlaygroundBackend:
         if not self.bngplayground_path:
             raise RuntimeError(
                 "BNGPLAYGROUND_PATH not set. Point it to your bngplayground repo root."
+            )
+
+        if not os.path.isdir(self.bngplayground_path):
+            raise RuntimeError(
+                f"BNGPLAYGROUND_PATH is not a directory: {self.bngplayground_path}"
             )
 
         server_script = os.path.join(
@@ -172,13 +183,20 @@ class BNGPlaygroundBackend:
     def _build_command(self, server_script: str) -> List[str]:
         """Build the command to launch the MCP server."""
         # Resolve executables to absolute paths to prevent cwd hijacking
+        # self.node_command is validated in __post_init__
         node_exec = shutil.which(self.node_command)
         if not node_exec:
             raise FileNotFoundError(f"Could not find executable for '{self.node_command}'")
 
+        # Ensure we use the absolute path
+        node_exec = os.path.abspath(node_exec)
+
+        # Convert path to absolute to avoid issues if bngplayground_path is relative
+        abs_bng_path = os.path.abspath(self.bngplayground_path)
+
         # Check if dist/index.js exists (pre-compiled)
         dist_path = os.path.join(
-            self.bngplayground_path, "packages", "mcp-server", "dist", "index.js"
+            abs_bng_path, "packages", "mcp-server", "dist", "index.js"
         )
         if os.path.exists(dist_path):
             return [node_exec, dist_path]
@@ -188,7 +206,14 @@ class BNGPlaygroundBackend:
         if not npx_exec:
             raise FileNotFoundError("Could not find executable for 'npx'")
 
-        return [npx_exec, "tsx", server_script]
+        npx_exec = os.path.abspath(npx_exec)
+
+        # Ensure server_script is also absolute
+        abs_server_script = os.path.abspath(server_script)
+        if not os.path.exists(abs_server_script):
+            raise FileNotFoundError(f"Could not find MCP server script at {abs_server_script}")
+
+        return [npx_exec, "tsx", abs_server_script]
 
     def _extract_text_content(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Extract JSON or raw text from the content array of an MCP result."""
