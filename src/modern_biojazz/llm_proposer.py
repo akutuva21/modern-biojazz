@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
+import socket
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import List, Protocol
@@ -25,7 +28,26 @@ class OpenAICompatibleProposer:
     max_feedback_items: int = 8
     feedback_log: List[str] | None = None
 
+    def _validate_url(self, url: str) -> None:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            raise ValueError(f"Only HTTPS URLs are allowed, got: {parsed.scheme}")
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("Invalid hostname in URL")
+        try:
+            ip = socket.gethostbyname(hostname)
+        except socket.gaierror as e:
+            raise ValueError(f"Could not resolve hostname {hostname}: {e}")
+        try:
+            ip_obj = ipaddress.ip_address(ip)
+        except ValueError as e:
+            raise ValueError(f"Invalid IP address resolved {ip}: {e}")
+        if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_link_local or ip_obj.is_multicast:
+            raise ValueError(f"URL resolves to an internal or reserved IP address: {ip}")
+
     def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
+        self._validate_url(self.base_url)
         recent_feedback = [] if self.feedback_log is None else self.feedback_log[-self.max_feedback_items :]
         prompt = {
             "role": "user",
@@ -120,6 +142,7 @@ class LLMDenoisingProposer:
     inner: OpenAICompatibleProposer
 
     def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
+        self.inner._validate_url(self.inner.base_url)
         prompt = {
             "role": "user",
             "content": (
