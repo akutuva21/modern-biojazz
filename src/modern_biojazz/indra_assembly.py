@@ -241,8 +241,9 @@ class INDRAGraphProposer:
         except Exception:
             pass
 
+        proteins = [p for p in proteins if p not in ['0', 'Trash']]
+
         if not proteins:
-            # Fallback to random actions if no proteins found
             return [self.rng.choice(action_names) for _ in range(max(1, budget))]
 
         target = self.rng.choice(proteins)
