@@ -268,10 +268,10 @@ class BNGPlaygroundBackend:
 
     def _generate_rules(self, network: ReactionNetwork) -> List[str]:
         lines = ["begin reaction rules"]
-        for rule in network.rules:
-            reactant_str = " + ".join(f"{r}()" for r in rule.reactants)
-            product_str = " + ".join(f"{p}()" for p in rule.products)
-            lines.append(f"  {rule.name}: {reactant_str} -> {product_str} {rule.name}_rate")
+        lines.extend(
+            f"  {rule.name}: {' + '.join([f'{r}()' for r in rule.reactants])} -> {' + '.join([f'{p}()' for p in rule.products])} {rule.name}_rate"
+            for rule in network.rules
+        )
         lines.extend(["end reaction rules", ""])
         return lines
 
