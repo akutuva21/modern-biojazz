@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
+import socket
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, Protocol
@@ -47,6 +50,33 @@ class CatalystHTTPClient:
     base_url: str
     timeout_seconds: float = 30.0
     retry_count: int = 2
+    _allow_insecure_for_testing: bool = False
+
+    def _validate_url(self, url: str) -> None:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            raise ValueError(f"Insecure scheme: {parsed.scheme}")
+
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("Invalid URL: missing hostname")
+
+        try:
+            addr_info = socket.getaddrinfo(hostname, None)
+        except socket.gaierror as e:
+            raise ValueError(f"Could not resolve hostname: {e}")
+
+        for _, _, _, _, sockaddr in addr_info:
+            ip = sockaddr[0]
+            ip_obj = ipaddress.ip_address(ip)
+            if (
+                ip_obj.is_private
+                or ip_obj.is_loopback
+                or ip_obj.is_link_local
+                or ip_obj.is_multicast
+                or ip_obj.is_reserved
+            ):
+                raise ValueError(f"URL resolves to internal/reserved IP address: {ip}")
 
     def simulate(
         self,
@@ -60,6 +90,9 @@ class CatalystHTTPClient:
             "solver": options.solver,
             "initial_conditions": options.initial_conditions or {},
         }
+        if not self._allow_insecure_for_testing:
+            self._validate_url(self.base_url)
+
         last_error: Exception | None = None
         for attempt in range(self.retry_count + 1):
             try:

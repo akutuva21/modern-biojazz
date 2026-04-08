@@ -45,7 +45,7 @@ def test_http_catalyst_client_e2e(seed_network):
     thread.start()
     try:
         base_url = f"http://127.0.0.1:{server.server_port}"
-        client = CatalystHTTPClient(base_url)
+        client = CatalystHTTPClient(base_url, _allow_insecure_for_testing=True)
         result = client.simulate(seed_network, SimulationOptions(t_end=8.0, dt=1.0, solver="Rodas5P"))
         score = FitnessEvaluator(target_output=1.0).score(result)
 
