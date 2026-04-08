@@ -71,14 +71,26 @@ class GraphMutator:
             if not any(self._token_references_protein(tok, protein_name) for tok in [*r.reactants, *r.products])
         ]
 
-    def add_site(self, network: ReactionNetwork, protein_name: str, site_name: str, site_type: str) -> None:
+    def add_site(
+        self,
+        network: ReactionNetwork,
+        protein_name: str,
+        site_name: str,
+        site_type: str,
+    ) -> None:
         protein = network.proteins.get(protein_name)
         if not protein:
             return
         if any(s.name == site_name for s in protein.sites):
             return
         new_sites = list(protein.sites)
-        new_sites.append(Site(name=site_name, site_type=site_type, states=["u", "p"] if site_type == "modification" else []))
+        new_sites.append(
+            Site(
+                name=site_name,
+                site_type=site_type,
+                states=["u", "p"] if site_type == "modification" else [],
+            )
+        )
         network.proteins[protein_name] = Protein(name=protein.name, sites=new_sites)
 
     def remove_site(self, network: ReactionNetwork, protein_name: str, site_name: str) -> None:
@@ -97,10 +109,24 @@ class GraphMutator:
         complex_species = f"{a}:{b}"
         self._add_species_if_missing(network, complex_species)
         network.rules.append(
-            Rule(name=rname, rule_type="binding", reactants=[a, b], products=[complex_species], rate=rate)
+            Rule(
+                name=rname,
+                rule_type="binding",
+                reactants=[a, b],
+                products=[complex_species],
+                rate=rate,
+            )
         )
 
-    def _add_simple_rule(self, network: ReactionNetwork, rule_type: str, r1: str, r2: str, p2_suffix: str, rate: float) -> None:
+    def _add_simple_rule(
+        self,
+        network: ReactionNetwork,
+        rule_type: str,
+        r1: str,
+        r2: str,
+        p2_suffix: str,
+        rate: float,
+    ) -> None:
         if r1 not in network.proteins or r2 not in network.proteins:
             return
         prefix = "phos" if rule_type == "phosphorylation" else "inh"
@@ -117,7 +143,9 @@ class GraphMutator:
             )
         )
 
-    def add_phosphorylation_rule(self, network: ReactionNetwork, kinase: str, substrate: str, rate: float = 0.2) -> None:
+    def add_phosphorylation_rule(
+        self, network: ReactionNetwork, kinase: str, substrate: str, rate: float = 0.2
+    ) -> None:
         self._add_simple_rule(network, "phosphorylation", kinase, substrate, "_P", rate)
 
     def add_inhibition_rule(self, network: ReactionNetwork, inhibitor: str, target: str, rate: float = 0.05) -> None:
@@ -127,7 +155,11 @@ class GraphMutator:
         network.rules = [r for r in network.rules if r.name != rule_name]
 
     def add_dephosphorylation_rule(
-        self, network: ReactionNetwork, phosphatase: str, substrate_phospho: str, rate: float = 0.15,
+        self,
+        network: ReactionNetwork,
+        phosphatase: str,
+        substrate_phospho: str,
+        rate: float = 0.15,
     ) -> None:
         """Add a reverse phosphorylation rule: phosphatase + substrate_P -> phosphatase + substrate."""
         if phosphatase not in network.proteins or substrate_phospho not in network.proteins:
@@ -176,7 +208,7 @@ class GraphMutator:
                     rule_type=r.rule_type,
                     reactants=r.reactants,
                     products=r.products,
-                    rate=min(100.0, max(1e-6, new_rate))
+                    rate=min(100.0, max(1e-6, new_rate)),
                 )
                 return
 
@@ -215,7 +247,13 @@ class GraphMutator:
             if not bind_sites:
                 # Add a new site
                 new_sites = list(protein.sites)
-                new_sites.append(Site(name=f"b_{partner}", site_type="binding", allowed_partners=[partner]))
+                new_sites.append(
+                    Site(
+                        name=f"b_{partner}",
+                        site_type="binding",
+                        allowed_partners=[partner],
+                    )
+                )
                 network.proteins[p] = Protein(name=protein.name, sites=new_sites)
             else:
                 if partner not in bind_sites[0].allowed_partners:
@@ -227,7 +265,12 @@ class GraphMutator:
 
                     for i, s in enumerate(new_sites):
                         if s.name == target_site.name:
-                            new_sites[i] = Site(name=s.name, site_type=s.site_type, states=s.states, allowed_partners=new_partners)
+                            new_sites[i] = Site(
+                                name=s.name,
+                                site_type=s.site_type,
+                                states=s.states,
+                                allowed_partners=new_partners,
+                            )
                             break
                     network.proteins[p] = Protein(name=protein.name, sites=new_sites)
 
@@ -255,6 +298,7 @@ class GraphMutator:
     def crossover(self, net1: ReactionNetwork, net2: ReactionNetwork) -> ReactionNetwork:
         """Structural crossover of two networks. Returns a new child network."""
         import copy
+
         child = net1.copy()
         if not net2.proteins:
             return child
@@ -332,7 +376,7 @@ class GraphMutator:
             self.modify_rate(net, target.name, multiplier)
 
         def random_remove_site(net: ReactionNetwork) -> None:
-            candidates = [(name, s.name) for name, p in net.proteins.items() for s in p.sites]
+            candidates = [(pname, s.name) for pname in net.proteins for s in net.proteins[pname].sites]
             if not candidates:
                 return
             pname, sname = self.rng.choice(candidates)
@@ -351,24 +395,14 @@ class GraphMutator:
             self.remove_protein(net, target)
 
         def random_dephos(net: ReactionNetwork) -> None:
-            phospho_species = []
-            candidates = []
-            for n in net.proteins:
-                if n.endswith("_P"):
-                    phospho_species.append(n)
-                else:
-                    candidates.append(n)
-
+            phospho_species = [name for name in net.proteins if name.endswith("_P")]
             if not phospho_species:
                 return
             substrate_p = self.rng.choice(phospho_species)
-
-            # Filter out substrate_p from candidates
-            valid_candidates = [c for c in candidates if c != substrate_p]
-
-            if not valid_candidates:
+            candidates = [n for n in net.proteins if n != substrate_p and not n.endswith("_P")]
+            if not candidates:
                 return
-            phosphatase = self.rng.choice(valid_candidates)
+            phosphatase = self.rng.choice(candidates)
             self.add_dephosphorylation_rule(net, phosphatase, substrate_p)
 
         def random_unbind(net: ReactionNetwork) -> None:
