@@ -332,10 +332,21 @@ class GraphMutator:
             self.modify_rate(net, target.name, multiplier)
 
         def random_remove_site(net: ReactionNetwork) -> None:
-            candidates = [(p.name, s.name) for p in net.proteins.values() for s in p.sites]
-            if not candidates:
+            weights = []
+            names = []
+            total_sites = 0
+            for name in net.proteins:
+                c = len(net.proteins[name].sites)
+                if c > 0:
+                    names.append(name)
+                    weights.append(c)
+                    total_sites += c
+
+            if total_sites == 0:
                 return
-            pname, sname = self.rng.choice(candidates)
+
+            pname = self.rng.choices(names, weights=weights, k=1)[0]
+            sname = self.rng.choice(net.proteins[pname].sites).name
             self.remove_site(net, pname, sname)
 
         def random_duplicate(net: ReactionNetwork) -> None:
