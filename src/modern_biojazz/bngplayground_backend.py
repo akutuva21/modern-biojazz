@@ -58,8 +58,21 @@ class BNGPlaygroundBackend:
     _request_id: int = 0
 
     def __post_init__(self) -> None:
+        if self.node_command not in ["node", "nodejs"]:
+            raise ValueError(f"node_command must be 'node' or 'nodejs', got: '{self.node_command}'")
+
         if not self.bngplayground_path:
             self.bngplayground_path = os.environ.get("BNGPLAYGROUND_PATH", "")
+
+        if self.bngplayground_path:
+            self.bngplayground_path = os.path.abspath(self.bngplayground_path)
+            if not os.path.isdir(self.bngplayground_path):
+                raise ValueError(f"BNGPLAYGROUND_PATH is not a valid directory: {self.bngplayground_path}")
+
+            # Additional validation to ensure it points to the expected repository
+            expected_mcp_server_dir = os.path.join(self.bngplayground_path, "packages", "mcp-server")
+            if not os.path.isdir(expected_mcp_server_dir):
+                raise ValueError(f"BNGPLAYGROUND_PATH does not appear to be the bngplayground repository root (missing {expected_mcp_server_dir})")
 
     def simulate(
         self,
