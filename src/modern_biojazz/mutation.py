@@ -260,7 +260,7 @@ class GraphMutator:
             return child
 
         # Add a random subset of proteins from net2
-        proteins_to_copy = self.rng.sample(list(net2.proteins.keys()), k=max(1, len(net2.proteins) // 2))
+        proteins_to_copy = self.rng.sample(list(net2.proteins), k=max(1, len(net2.proteins) // 2))
         for p_name in proteins_to_copy:
             if p_name not in child.proteins:
                 child.proteins[p_name] = copy.deepcopy(net2.proteins[p_name])
@@ -288,7 +288,7 @@ class GraphMutator:
         def random_add_site(net: ReactionNetwork) -> None:
             if not net.proteins:
                 self.add_protein(net)
-            target = self.rng.choice(list(net.proteins.keys()))
+            target = self.rng.choice(list(net.proteins))
             site_type = self.rng.choice(["binding", "modification"])
             self.add_site(net, target, f"s{self.rng.randint(1, 999)}", site_type)
 
@@ -296,7 +296,7 @@ class GraphMutator:
             if len(net.proteins) < 2:
                 self.add_protein(net)
                 self.add_protein(net)
-            names = list(net.proteins.keys())
+            names = list(net.proteins)
             a, b = self.rng.sample(names, 2)
             self._ensure_binding_sites(net, a, b)
             self.add_binding_rule(net, a, b)
@@ -305,7 +305,7 @@ class GraphMutator:
             if len(net.proteins) < 2:
                 self.add_protein(net)
                 self.add_protein(net)
-            names = list(net.proteins.keys())
+            names = list(net.proteins)
             k, s = self.rng.sample(names, 2)
             self.add_phosphorylation_rule(net, k, s)
 
@@ -313,7 +313,7 @@ class GraphMutator:
             if len(net.proteins) < 2:
                 self.add_protein(net)
                 self.add_protein(net)
-            names = list(net.proteins.keys())
+            names = list(net.proteins)
             i, t = self.rng.sample(names, 2)
             self.add_inhibition_rule(net, i, t)
 
@@ -341,13 +341,13 @@ class GraphMutator:
         def random_duplicate(net: ReactionNetwork) -> None:
             if not net.proteins:
                 self.add_protein(net)
-            target = self.rng.choice(list(net.proteins.keys()))
+            target = self.rng.choice(list(net.proteins))
             self.duplicate_protein_with_rewiring(net, target)
 
         def random_remove_protein(net: ReactionNetwork) -> None:
             if len(net.proteins) <= 1:
                 return
-            target = self.rng.choice(list(net.proteins.keys()))
+            target = self.rng.choice(list(net.proteins))
             self.remove_protein(net, target)
 
         def random_dephos(net: ReactionNetwork) -> None:
