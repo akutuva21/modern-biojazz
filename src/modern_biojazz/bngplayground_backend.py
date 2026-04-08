@@ -160,7 +160,6 @@ class BNGPlaygroundBackend:
         stdin_data = init_msg + "\n" + tool_msg + "\n"
 
         try:
-            # Try tsx first (TypeScript loader), fall back to compiled JS
             cmd = self._build_command(server_script)
             proc = subprocess.run(  # nosec B603
                 cmd,
@@ -196,12 +195,10 @@ class BNGPlaygroundBackend:
         if os.path.exists(dist_path):
             return [node_exec, dist_path]
 
-        # Fall back to tsx for TypeScript
-        npx_exec = shutil.which("npx")
-        if not npx_exec:
-            raise FileNotFoundError("Could not find executable for 'npx'")
-
-        return [npx_exec, "tsx", server_script]
+        raise FileNotFoundError(
+            f"Could not find compiled MCP server at {dist_path}. "
+            "Ensure you have run 'npm install' and built the project."
+        )
 
     def _extract_text_content(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Extract JSON or raw text from the content array of an MCP result."""
