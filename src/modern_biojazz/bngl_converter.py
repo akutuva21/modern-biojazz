@@ -182,53 +182,22 @@ def _parse_reaction_rules(text: str, params: Dict[str, float]) -> List[Rule]:
 
         counter += 1
 
-        # Strip optional rule label: "r1: ..."
-        if ":" in line and not line.startswith("("):
-            label_part, _, line = line.partition(":")
-            rule_name = label_part.strip()
-            line = line.strip()
-        else:
-            rule_name = f"rule_{counter}"
+        rule_name, line = _parse_rule_label(line, counter)
 
-        # Detect reversible (<->) vs forward-only (->)
-        if "<->" in line:
-            lhs, _, rhs_and_rates = line.partition("<->")
-            reversible = True
-        elif "->" in line:
-            lhs, _, rhs_and_rates = line.partition("->")
-            reversible = False
-        else:
+        sides = _split_reaction_sides(line)
+        if not sides:
             continue
+        reversible, lhs, rhs_and_rates = sides
 
-        # Split RHS into products and rate(s)
-        # Products end where the rate parameters begin (last 1 or 2 tokens).
-        rhs_tokens = rhs_and_rates.strip().split()
+        rhs_tokens = rhs_and_rates.split()
         if not rhs_tokens:
             continue
 
-        # Rate parameters are the rightmost tokens that look like numbers or param names.
-        rate_tokens: List[str] = []
-        product_tokens: List[str] = []
-        # Walk backwards to find where rates start.
-        # For reversible: "A().B() kf, kr" → rates = ["kf,", "kr"] or "kf", "kr"
-        # For forward: "A().B() kf" → rates = ["kf"]
-        found_plus = False
-        for tok in reversed(rhs_tokens):
-            tok_clean = tok.strip(",")
-            if _is_rate_token(tok_clean, params):
-                rate_tokens.insert(0, tok)
-            else:
-                product_tokens = rhs_tokens[: rhs_tokens.index(tok) + 1]
-                break
-
-        if not product_tokens:
-            # All tokens were rates — the last non-rate must be a product
-            product_tokens = rhs_tokens[:1]
-            rate_tokens = rhs_tokens[1:]
+        product_tokens, rate_tokens = _split_rhs_tokens(rhs_tokens, params)
 
         product_str = " ".join(product_tokens)
 
-        reactant_mols = _extract_mol_names(lhs.strip())
+        reactant_mols = _extract_mol_names(lhs)
         product_mols = _extract_mol_names(product_str)
         rates = _resolve_rates(rate_tokens, params)
 
@@ -261,6 +230,47 @@ def _parse_reaction_rules(text: str, params: Dict[str, float]) -> List[Rule]:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _split_rhs_tokens(
+    rhs_tokens: List[str], params: Dict[str, float]
+) -> Tuple[List[str], List[str]]:
+    """Split RHS tokens into product tokens and rate tokens."""
+    rate_tokens: List[str] = []
+    product_tokens: List[str] = []
+
+    for tok in reversed(rhs_tokens):
+        tok_clean = tok.strip(",")
+        if _is_rate_token(tok_clean, params):
+            rate_tokens.insert(0, tok)
+        else:
+            product_tokens = rhs_tokens[: rhs_tokens.index(tok) + 1]
+            break
+
+    if not product_tokens:
+        product_tokens = rhs_tokens[:1]
+        rate_tokens = rhs_tokens[1:]
+
+    return product_tokens, rate_tokens
+
+
+def _split_reaction_sides(line: str) -> Optional[Tuple[bool, str, str]]:
+    """Determine if a rule is reversible and split into LHS and RHS."""
+    if "<->" in line:
+        lhs, _, rhs_and_rates = line.partition("<->")
+        return True, lhs.strip(), rhs_and_rates.strip()
+    if "->" in line:
+        lhs, _, rhs_and_rates = line.partition("->")
+        return False, lhs.strip(), rhs_and_rates.strip()
+    return None
+
+
+def _parse_rule_label(line: str, counter: int) -> Tuple[str, str]:
+    """Extract optional rule label from a reaction rule line."""
+    if ":" in line and not line.startswith("("):
+        label_part, _, rest = line.partition(":")
+        return label_part.strip(), rest.strip()
+    return f"rule_{counter}", line
 
 
 def _bare_mol_name(pattern: str) -> str:

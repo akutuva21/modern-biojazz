@@ -3,7 +3,8 @@ from unittest.mock import MagicMock, patch
 from modern_biojazz.bngplayground_backend import BNGPlaygroundBackend, BNGLParsingError
 from modern_biojazz.site_graph import ReactionNetwork, Protein, Site, Rule
 
-def test_parse_bngl_success():
+@patch('os.path.isdir', return_value=True)
+def test_parse_bngl_success(mock_isdir):
     """Test parse_bngl by mocking the MCP tool caller on success."""
     backend = BNGPlaygroundBackend(bngplayground_path=".")
     expected_response = {"parsed_model": "some_data", "success": True}
@@ -14,7 +15,8 @@ def test_parse_bngl_success():
         assert result == expected_response
         mock_call_mcp.assert_called_once_with("parse_bngl", {"bngl": sample_bngl})
 
-def test_parse_bngl_error():
+@patch('os.path.isdir', return_value=True)
+def test_parse_bngl_error(mock_isdir):
     """Test parse_bngl by mocking the MCP tool caller on error."""
     backend = BNGPlaygroundBackend(bngplayground_path=".")
     error_message = "Syntax error at line 1"
@@ -27,7 +29,8 @@ def test_parse_bngl_error():
         assert str(exc_info.value) == error_message
         mock_call_mcp.assert_called_once_with("parse_bngl", {"bngl": sample_bngl})
 
-def test_network_to_bngl():
+@patch('os.path.isdir', return_value=True)
+def test_network_to_bngl(mock_isdir):
     """Test the generation of BNGL text from a ReactionNetwork."""
     proteins = {
         "A": Protein(name="A", sites=[Site(name="s1", site_type="binding")]),
@@ -48,3 +51,30 @@ def test_network_to_bngl():
     assert "B(s1)" in bngl
     # Note: PR 33 updated rule formatting to "r1: A() + B() -> A_B() r1_rate"
     assert "r1: A() + B() -> A_B() r1_rate" in bngl
+
+def test_security_node_command_validation():
+    """Test that node_command must be 'node' or 'nodejs'."""
+    with pytest.raises(ValueError, match="node_command must be 'node' or 'nodejs'"):
+        BNGPlaygroundBackend(bngplayground_path="/dummy/path", node_command="malicious_command")
+
+@patch('os.path.isdir', return_value=False)
+def test_security_bngplayground_path_validation_invalid(mock_isdir):
+    """Test that an invalid directory for bngplayground_path raises ValueError."""
+    with pytest.raises(ValueError, match="BNGPLAYGROUND_PATH is not a valid directory"):
+        BNGPlaygroundBackend(bngplayground_path="/non_existent/path")
+
+@patch('os.path.isdir')
+def test_security_bngplayground_path_validation_valid(mock_isdir):
+    """Test that a valid directory for bngplayground_path passes validation."""
+    # os.path.isdir needs to return True for both the root dir and the packages/mcp-server subdir
+    mock_isdir.return_value = True
+    backend = BNGPlaygroundBackend(bngplayground_path="/valid/path")
+    assert "/valid/path" in backend.bngplayground_path
+
+@patch('os.path.isdir')
+def test_security_bngplayground_path_validation_invalid_repo(mock_isdir):
+    """Test that a directory without the packages/mcp-server subdirectory raises ValueError."""
+    # Return True for the root dir, but False for the mcp-server dir
+    mock_isdir.side_effect = [True, False]
+    with pytest.raises(ValueError, match="BNGPLAYGROUND_PATH does not appear to be the bngplayground repository root"):
+        BNGPlaygroundBackend(bngplayground_path="/invalid/repo/path")

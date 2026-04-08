@@ -37,7 +37,7 @@ class ModernBioJazzPipeline:
             # network's existing proteins so that evolution doesn't reject the starting
             # state or its natural derivatives (phospho, inhibited, complex, duplicated).
             abstract_keys = set(grounding_payload["abstract"]["nodes"])
-            seed_keys = set(seed_network.proteins.keys())
+            seed_keys = set(seed_network.proteins)
             allowed = abstract_keys | seed_keys
             self.evolution_engine.candidate_filter = self._grounding_constraint_filter(allowed)
 
