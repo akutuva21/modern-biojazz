@@ -58,8 +58,16 @@ class BNGPlaygroundBackend:
     _request_id: int = 0
 
     def __post_init__(self) -> None:
+        if self.node_command not in ("node", "nodejs"):
+            raise ValueError(f"Invalid node_command '{self.node_command}'. Only 'node' or 'nodejs' are allowed.")
+
         if not self.bngplayground_path:
             self.bngplayground_path = os.environ.get("BNGPLAYGROUND_PATH", "")
+
+        if self.bngplayground_path:
+            self.bngplayground_path = os.path.abspath(self.bngplayground_path)
+            if not os.path.isdir(self.bngplayground_path):
+                raise ValueError(f"bngplayground_path '{self.bngplayground_path}' is not a valid directory.")
 
     def simulate(
         self,

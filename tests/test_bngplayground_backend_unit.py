@@ -5,7 +5,7 @@ from modern_biojazz.site_graph import ReactionNetwork, Protein, Site, Rule
 
 def test_parse_bngl_success():
     """Test parse_bngl by mocking the MCP tool caller on success."""
-    backend = BNGPlaygroundBackend(bngplayground_path="/dummy/path")
+    backend = BNGPlaygroundBackend(bngplayground_path=".")
     expected_response = {"parsed_model": "some_data", "success": True}
 
     with patch.object(backend, '_call_mcp_tool', return_value=expected_response) as mock_call_mcp:
@@ -16,7 +16,7 @@ def test_parse_bngl_success():
 
 def test_parse_bngl_error():
     """Test parse_bngl by mocking the MCP tool caller on error."""
-    backend = BNGPlaygroundBackend(bngplayground_path="/dummy/path")
+    backend = BNGPlaygroundBackend(bngplayground_path=".")
     error_message = "Syntax error at line 1"
     error_response = {"error": error_message}
 
@@ -38,7 +38,7 @@ def test_network_to_bngl():
     ]
 
     network = ReactionNetwork(proteins=proteins, rules=rules)
-    backend = BNGPlaygroundBackend(bngplayground_path="/dummy/path")
+    backend = BNGPlaygroundBackend(bngplayground_path=".")
 
     bngl = backend._network_to_bngl(network, t_end=10.0, dt=1.0)
 
