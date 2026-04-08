@@ -153,31 +153,10 @@ class LocalCatalystEngine:
         try:
             if solve_ivp is not None:
                 used_solver = "BDF"
-                solved = solve_ivp(
-                    fun=rhs,
-                    t_span=(0.0, options.t_end),
-                    y0=y0,
-                    method="BDF",
-                    t_eval=t_eval,
-                    vectorized=False,
-                    rtol=1e-6,
-                    atol=1e-9,
-                )
-                if not solved.success or solved.y is None:
-                    raise RuntimeError(f"BDF solve failed: {solved.message}")
-                y_series = solved.y
+                _, y_series = self._solve_bdf(solve_ivp, rhs, options, y0, t_eval)
             else:
                 used_solver = "EulerFallback"
-                # Fallback keeps local execution available when SciPy is not present.
-                current = list(y0)
-                snapshots = [list(current)]
-                for _ in range(1, len(t_eval)):
-                    deriv = rhs(0.0, current)
-                    current = [max(0.0, c + options.dt * dc) for c, dc in zip(current, deriv)]
-                    snapshots.append(list(current))
-                # Shape contract for both solver paths: y_series[species_index][time_index].
-                y_series = [list(col) for col in zip(*snapshots)]
-                used_solver = "EulerFallback"
+                _, y_series = self._solve_euler(rhs, options, y0, t_eval)
         except Exception as exc:
             return {
                 "trajectory": [],
@@ -208,6 +187,46 @@ class LocalCatalystEngine:
                 "stiff": stiffness_proxy,
             },
         }
+
+    def _solve_bdf(
+        self,
+        solve_ivp: Any,
+        rhs: Any,
+        options: SimulationOptions,
+        y0: list[float],
+        t_eval: list[float],
+    ) -> tuple[str, list[list[float]]]:
+        solved = solve_ivp(
+            fun=rhs,
+            t_span=(0.0, options.t_end),
+            y0=y0,
+            method="BDF",
+            t_eval=t_eval,
+            vectorized=False,
+            rtol=1e-6,
+            atol=1e-9,
+        )
+        if not solved.success or solved.y is None:
+            raise RuntimeError(f"BDF solve failed: {solved.message}")
+        return "BDF", solved.y
+
+    def _solve_euler(
+        self,
+        rhs: Any,
+        options: SimulationOptions,
+        y0: list[float],
+        t_eval: list[float],
+    ) -> tuple[str, list[list[float]]]:
+        # Fallback keeps local execution available when SciPy is not present.
+        current = list(y0)
+        snapshots = [list(current)]
+        for _ in range(1, len(t_eval)):
+            deriv = rhs(0.0, current)
+            current = [max(0.0, c + options.dt * dc) for c, dc in zip(current, deriv)]
+            snapshots.append(list(current))
+        # Shape contract for both solver paths: y_series[species_index][time_index].
+        y_series = [list(col) for col in zip(*snapshots)]
+        return "EulerFallback", y_series
 
 
 @dataclass
