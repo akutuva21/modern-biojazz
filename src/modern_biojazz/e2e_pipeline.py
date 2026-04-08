@@ -78,6 +78,7 @@ class E2EConfig:
 class E2EResult:
     """Result of a full end-to-end run."""
 
+    config: E2EConfig
     discovery: PathwayDiscoveryResult
     assembly: AssemblyResult
     baseline_network: ReactionNetwork
@@ -136,6 +137,7 @@ def run_e2e(
     best_score = optimized_score if optimized_score is not None else evolved_score
 
     return E2EResult(
+        config=cfg,
         discovery=discovery,
         assembly=assembly,
         baseline_network=baseline_network,
@@ -343,30 +345,13 @@ def _fallback_assembly(species: List[str], reason: str) -> AssemblyResult:
 
 
 def print_e2e_summary(result: E2EResult) -> None:
-    """Print a human-readable summary of the E2E run."""
-    print(f"Discovery: {len(result.discovery.species)} species from {result.discovery.source}")
-    print(f"Assembly:  {len(result.assembly.statements)} statements from {result.assembly.source}")
-    print(f"Baseline:  {len(result.baseline_network.proteins)} proteins, "
-          f"{len(result.baseline_network.rules)} rules, score={result.baseline_score:.4f}")
-    print(f"Evolved:   {len(result.evolved_network.proteins)} proteins, "
-          f"{len(result.evolved_network.rules)} rules, score={result.evolved_score:.4f}")
-
-    if result.optimized_network is not None and result.optimized_score is not None:
-        print(f"Optimized: {len(result.optimized_network.rules)} rules, "
-              f"score={result.optimized_score:.4f} "
-              f"(+{result.optimized_score - result.evolved_score:.4f} from rate tuning)")
-
-    sign = "+" if result.improvement >= 0 else ""
-    print(f"Delta:     {sign}{result.improvement:.4f}")
-
-    if result.grounding:
-        score = getattr(result.grounding, "score", 0.0)
-        candidates = getattr(result.grounding, "candidates_considered", 0)
-        print(f"Grounding: {candidates} candidates, best score={score:.4f}")
-        mapping = getattr(result.grounding, "mapping", None)
-        if mapping:
-            for abstract, real in sorted(mapping.items()):
-                print(f"  {abstract} -> {real}")
+    print("\n" + "=" * 50)
+    print("E2E Pipeline Summary")
+    print("=" * 50)
+    print(f"Seed genes:       {result.config.seed_genes}")
+    print(f"Discovery source: {result.discovery.source}")
+    print(f"Discovered ops:   {len(result.discovery.species)} species, {len(result.discovery.interactions)} interactions")
+    print(f"Assembly source:  {result.assembly.source}")
 
 
 def print_evolution_summary(result: E2EResult) -> None:
