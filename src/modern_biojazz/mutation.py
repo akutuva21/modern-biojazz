@@ -351,13 +351,18 @@ class GraphMutator:
             self.remove_protein(net, target)
 
         def random_dephos(net: ReactionNetwork) -> None:
-            phospho_species = [name for name in net.proteins.keys() if name.endswith("_P")]
-            if not phospho_species:
+            phospho_species = []
+            candidates = []
+            for name in net.proteins:
+                if name.endswith("_P"):
+                    phospho_species.append(name)
+                else:
+                    candidates.append(name)
+
+            if not phospho_species or not candidates:
                 return
+
             substrate_p = self.rng.choice(phospho_species)
-            candidates = [n for n in net.proteins.keys() if n != substrate_p and not n.endswith("_P")]
-            if not candidates:
-                return
             phosphatase = self.rng.choice(candidates)
             self.add_dephosphorylation_rule(net, phosphatase, substrate_p)
 
