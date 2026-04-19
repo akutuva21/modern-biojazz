@@ -15,6 +15,9 @@ from typing import Dict, List, Optional, Tuple
 
 from .site_graph import Protein, ReactionNetwork, Rule, Site
 
+_PLUS_SPLIT_RE = re.compile(r"\s*\+\s*")
+_DOT_SPLIT_RE = re.compile(r"(?<=[)])\.")
+
 
 def bngl_to_reaction_network(
     bngl_text: str,
@@ -286,14 +289,14 @@ def _extract_mol_names(expr: str) -> List[str]:
     'A(x!1).B(y!1)' → ['A:B'] (complex)
     'STAT3()' → ['STAT3']
     """
-    tokens = re.split(r"\s*\+\s*", expr.strip())
+    tokens = _PLUS_SPLIT_RE.split(expr.strip())
     names: List[str] = []
     for tok in tokens:
         tok = tok.strip()
         if not tok:
             continue
         # Complex: A(x!1).B(y!1) → single complex species
-        sub_mols = re.split(r"(?<=[)])\.", tok)
+        sub_mols = _DOT_SPLIT_RE.split(tok)
         if len(sub_mols) > 1:
             parts = [_state_qualified_name(s) for s in sub_mols]
             names.append(":".join(parts))
