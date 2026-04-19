@@ -11,6 +11,7 @@ from modern_biojazz.simulation import (
     UltrasensitiveFitnessEvaluator,
     SimulationOptions,
     DoseResponseConfig,
+    CatalystHTTPClient,
 )
 
 
@@ -77,6 +78,12 @@ def test_local_engine_handles_simulation_error_euler(seed_network, monkeypatch):
     assert "error" in result["stats"]
     assert "Euler loop failure" in result["stats"]["error"]
     assert result["solver"] == "EulerFallback"
+
+
+def test_catalyst_client_rejects_insecure_urls():
+    client = CatalystHTTPClient(base_url="http://example.com")
+    with pytest.raises(ValueError, match="Insecure scheme: http"):
+        client._validate_url("http://example.com")
 
 
 def test_local_engine_handles_simulation_error_scipy(seed_network, monkeypatch):
