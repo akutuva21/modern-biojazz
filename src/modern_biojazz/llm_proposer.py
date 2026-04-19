@@ -11,6 +11,14 @@ from dataclasses import dataclass
 from typing import List, Protocol
 
 
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def http_error_302(self, req, fp, code, msg, headers):
+        import urllib.error
+        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_302
+
+
 class ActionProposer(Protocol):
     def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
         ...
@@ -36,15 +44,24 @@ class OpenAICompatibleProposer:
         if not hostname:
             raise ValueError("Invalid hostname in URL")
         try:
-            ip = socket.gethostbyname(hostname)
+            addr_info = socket.getaddrinfo(hostname, None)
         except socket.gaierror as e:
             raise ValueError(f"Could not resolve hostname {hostname}: {e}")
-        try:
-            ip_obj = ipaddress.ip_address(ip)
-        except ValueError as e:
-            raise ValueError(f"Invalid IP address resolved {ip}: {e}")
-        if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_link_local or ip_obj.is_multicast:
-            raise ValueError(f"URL resolves to an internal or reserved IP address: {ip}")
+
+        for _, _, _, _, sockaddr in addr_info:
+            ip = sockaddr[0]
+            try:
+                ip_obj = ipaddress.ip_address(ip)
+            except ValueError as e:
+                raise ValueError(f"Invalid IP address resolved {ip}: {e}")
+            if (
+                ip_obj.is_private
+                or ip_obj.is_loopback
+                or ip_obj.is_link_local
+                or ip_obj.is_multicast
+                or ip_obj.is_reserved
+            ):
+                raise ValueError(f"URL resolves to an internal or reserved IP address: {ip}")
 
     def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
         self._validate_url(self.base_url)
@@ -81,7 +98,8 @@ class OpenAICompatibleProposer:
                     },
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
+                opener = urllib.request.build_opener(NoRedirectHandler())
+                with opener.open(req, timeout=self.timeout_seconds) as response:
                     raw = json.loads(response.read().decode("utf-8"))
                 break
             except Exception as exc:
@@ -179,7 +197,8 @@ class LLMDenoisingProposer:
                     },
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=self.inner.timeout_seconds) as response:
+                opener = urllib.request.build_opener(NoRedirectHandler())
+                with opener.open(req, timeout=self.inner.timeout_seconds) as response:
                     raw = json.loads(response.read().decode("utf-8"))
                 break
             except Exception as exc:
