@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import pytest
 from modern_biojazz.pathway_discovery import (
     PathwayDiscoveryResult,
     load_discovery_snapshot,
@@ -24,6 +25,28 @@ def test_save_and_load_discovery_snapshot(tmp_path: Path):
     assert loaded_result.interactions == result.interactions
     assert loaded_result.source == result.source
 
+def test_save_discovery_snapshot_content(tmp_path: Path):
+    result = PathwayDiscoveryResult(
+        seed_genes=["X", "Y"],
+        species=["X", "Y", "Z"],
+        interactions=[{"source": "X", "target": "Y"}],
+        source="custom_source"
+    )
+
+    file_path = tmp_path / "content_test.json"
+    save_discovery_snapshot(result, str(file_path))
+
+    # Read back as raw JSON to verify correct formatting
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert data == {
+        "seed_genes": ["X", "Y"],
+        "species": ["X", "Y", "Z"],
+        "interactions": [{"source": "X", "target": "Y"}],
+        "source": "custom_source"
+    }
+
 def test_load_discovery_snapshot_missing_source(tmp_path: Path):
     data = {
         "seed_genes": ["X", "Y"],
@@ -41,3 +64,14 @@ def test_load_discovery_snapshot_missing_source(tmp_path: Path):
     assert loaded_result.species == data["species"]
     assert loaded_result.interactions == data["interactions"]
     assert loaded_result.source == "snapshot"
+
+def test_save_discovery_snapshot_invalid_path():
+    result = PathwayDiscoveryResult(
+        seed_genes=["A"],
+        species=["A"],
+        interactions=[],
+        source="omnipath"
+    )
+
+    with pytest.raises((FileNotFoundError, OSError)):
+        save_discovery_snapshot(result, "/nonexistent/directory/path/snapshot.json")
