@@ -7,7 +7,7 @@ import socket
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Protocol
 
 from .site_graph import ReactionNetwork
@@ -26,8 +26,7 @@ class SimulationBackend(Protocol):
         self,
         network: ReactionNetwork,
         options: SimulationOptions,
-    ) -> Dict[str, Any]:
-        ...
+    ) -> Dict[str, Any]: ...
 
 
 class FitnessScorer(Protocol):
@@ -41,8 +40,7 @@ class FitnessScorer(Protocol):
         dt: float = 1.0,
         solver: str = "Rodas5P",
         initial_conditions: Dict[str, float] | None = None,
-    ) -> float:
-        ...
+    ) -> float: ...
 
 
 @dataclass
@@ -94,6 +92,15 @@ class CatalystHTTPClient:
             self._validate_url(self.base_url)
 
         last_error: Exception | None = None
+
+        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def redirect_request(
+                self, req: urllib.request.Request, fp: Any, code: int, msg: str, headers: Any, newurl: str
+            ) -> Any:
+                return None
+
+        opener = urllib.request.build_opener(NoRedirectHandler)
+
         for attempt in range(self.retry_count + 1):
             try:
                 req = urllib.request.Request(
@@ -102,7 +109,7 @@ class CatalystHTTPClient:
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
+                with opener.open(req, timeout=self.timeout_seconds) as response:  # nosec B310
                     status = getattr(response, "status", 200)
                     if status >= 400:
                         raise RuntimeError(f"Catalyst service returned HTTP {status}")
@@ -342,7 +349,9 @@ class UltrasensitiveFitnessEvaluator:
             series = result.get("trajectory", [])
             final = 0.0
             if series:
-                final = float(series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0)))
+                final = float(
+                    series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0))
+                )
             responses.append(max(1e-8, final))
 
         lo = responses[0]
