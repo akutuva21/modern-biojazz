@@ -5,8 +5,8 @@ import json
 import re
 import socket
 import time
-import urllib.parse
-import urllib.request
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 from dataclasses import dataclass
 from typing import List, Protocol
 
@@ -29,7 +29,7 @@ class OpenAICompatibleProposer:
     feedback_log: List[str] | None = None
 
     def _validate_url(self, url: str) -> None:
-        parsed = urllib.parse.urlparse(url)
+        parsed = urlparse(url)
         if parsed.scheme != "https":
             raise ValueError(f"Only HTTPS URLs are allowed, got: {parsed.scheme}")
         hostname = parsed.hostname
@@ -72,7 +72,7 @@ class OpenAICompatibleProposer:
         last_error: Exception | None = None
         for attempt in range(self.retry_count + 1):
             try:
-                req = urllib.request.Request(
+                req = Request(
                     url=f"{self.base_url.rstrip('/')}/chat/completions",
                     data=json.dumps(payload).encode("utf-8"),
                     headers={
@@ -81,7 +81,7 @@ class OpenAICompatibleProposer:
                     },
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
+                with urlopen(req, timeout=self.timeout_seconds) as response:
                     raw = json.loads(response.read().decode("utf-8"))
                 break
             except Exception as exc:
@@ -170,7 +170,7 @@ class LLMDenoisingProposer:
         last_error: Exception | None = None
         for attempt in range(self.inner.retry_count + 1):
             try:
-                req = urllib.request.Request(
+                req = Request(
                     url=f"{self.inner.base_url.rstrip('/')}/chat/completions",
                     data=json.dumps(payload).encode("utf-8"),
                     headers={
@@ -179,7 +179,7 @@ class LLMDenoisingProposer:
                     },
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=self.inner.timeout_seconds) as response:
+                with urlopen(req, timeout=self.inner.timeout_seconds) as response:
                     raw = json.loads(response.read().decode("utf-8"))
                 break
             except Exception as exc:

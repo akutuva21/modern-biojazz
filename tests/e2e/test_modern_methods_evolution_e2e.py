@@ -80,7 +80,7 @@ def test_evolution_with_indra_proposer_e2e(mock_urlopen):
 
 
 @patch("modern_biojazz.llm_proposer.OpenAICompatibleProposer._validate_url")
-@patch("urllib.request.urlopen")
+@patch("modern_biojazz.llm_proposer.urlopen")
 def test_evolution_with_llm_denoising_proposer_e2e(mock_urlopen, mock_validate):
     """
     Robust E2E test verifying that LLMDenoisingProposer correctly passes LLM suggestions
@@ -279,7 +279,7 @@ def test_indra_proposer_phosphorylation_mek_erk_e2e(mock_urlopen):
 
 
 @patch("modern_biojazz.llm_proposer.OpenAICompatibleProposer._validate_url")
-@patch("urllib.request.urlopen")
+@patch("modern_biojazz.llm_proposer.urlopen")
 def test_evolution_llm_denoising_feedback_loop_p53_mdm2_e2e(mock_urlopen, mock_validate):
     """
     Test 7: Verify LLMDenoisingProposer accurately applies negative feedback
