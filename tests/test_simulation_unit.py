@@ -11,6 +11,7 @@ from modern_biojazz.simulation import (
     UltrasensitiveFitnessEvaluator,
     SimulationOptions,
     DoseResponseConfig,
+    CatalystHTTPClient,
 )
 
 
@@ -99,3 +100,10 @@ def test_local_engine_handles_simulation_error_scipy(seed_network, monkeypatch):
     assert "error" in result["stats"]
     assert "SciPy solver failure" in result["stats"]["error"]
     assert result["solver"] == "BDF"
+
+
+def test_catalyst_client_simulate_validates_url(seed_network):
+    # Testing that simulate calls url validation when _allow_insecure_for_testing is False
+    client = CatalystHTTPClient("http://example.com", _allow_insecure_for_testing=False)
+    with pytest.raises(ValueError, match="Insecure scheme"):
+        client.simulate(seed_network, SimulationOptions(t_end=1.0, dt=1.0))
