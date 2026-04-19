@@ -53,3 +53,28 @@ def test_indra_graph_proposer_fallback_no_proteins():
 
     # Should fallback gracefully
     assert actions == ["add_site"]
+
+
+def test_save_assembly_snapshot_success(tmp_path):
+    from modern_biojazz.indra_assembly import AssemblyResult, save_assembly_snapshot
+    import json
+
+    result = AssemblyResult(
+        species=["STAT3"],
+        statements=[{"type": "Phosphorylation", "enz": "JAK2", "sub": "STAT3"}],
+        bngl_text="begin model\nend model",
+        source="indra_live"
+    )
+
+    file_path = tmp_path / "snapshot.json"
+    save_assembly_snapshot(result, file_path)
+
+    assert file_path.exists()
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert data["species"] == ["STAT3"]
+    assert data["statements"][0]["type"] == "Phosphorylation"
+    assert data["bngl_text"] == "begin model\nend model"
+    assert data["source"] == "indra_live"
