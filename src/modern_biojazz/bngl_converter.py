@@ -16,6 +16,12 @@ from typing import Dict, List, Optional, Tuple
 from .site_graph import Protein, ReactionNetwork, Rule, Site
 
 
+_RE_MOL_SITES = re.compile(r"(\w+)\(([^)]*)\)")
+_RE_WORD = re.compile(r"(\w+)")
+_RE_BOND_MARKERS = re.compile(r"![^\s,)~]*")
+_RE_PLUS_SPLIT = re.compile(r"\s*\+\s*")
+_RE_COMPLEX_SPLIT = re.compile(r"(?<=[)])\.")
+
 def bngl_to_reaction_network(
     bngl_text: str,
     metadata: Optional[Dict] = None,
@@ -116,7 +122,7 @@ def _parse_molecule_types(text: str) -> Dict[str, List[Tuple[str, List[str]]]]:
 
 def _parse_mol_pattern(pattern: str) -> Tuple[str, List[Tuple[str, List[str]]]]:
     """Parse 'STAT3(Y705~u~p,SH2)' into ('STAT3', [('Y705', ['u','p']), ('SH2', [])])."""
-    m = re.match(r"(\w+)\(([^)]*)\)", pattern.strip())
+    m = _RE_MOL_SITES.match(pattern.strip())
     if not m:
         # Bare molecule: 'STAT3' with no sites
         name = pattern.strip().split()[0] if pattern.strip() else ""
@@ -134,7 +140,7 @@ def _parse_mol_pattern(pattern: str) -> Tuple[str, List[Tuple[str, List[str]]]]:
         if not site_token:
             continue
         # Remove bond markers like !1, !+, !?
-        site_token = re.sub(r"![^\s,)~]*", "", site_token)
+        site_token = _RE_BOND_MARKERS.sub("", site_token)
         # Parse states: site_name~state1~state2
         parts = site_token.split("~")
         sname = parts[0].strip()
@@ -275,7 +281,7 @@ def _parse_rule_label(line: str, counter: int) -> Tuple[str, str]:
 
 def _bare_mol_name(pattern: str) -> str:
     """Extract the bare molecule name from a BNGL pattern like 'STAT3(Y705~u)'."""
-    m = re.match(r"(\w+)", pattern.strip())
+    m = _RE_WORD.match(pattern.strip())
     return m.group(1) if m else pattern.strip()
 
 
@@ -286,14 +292,14 @@ def _extract_mol_names(expr: str) -> List[str]:
     'A(x!1).B(y!1)' → ['A:B'] (complex)
     'STAT3()' → ['STAT3']
     """
-    tokens = re.split(r"\s*\+\s*", expr.strip())
+    tokens = _RE_PLUS_SPLIT.split(expr.strip())
     names: List[str] = []
     for tok in tokens:
         tok = tok.strip()
         if not tok:
             continue
         # Complex: A(x!1).B(y!1) → single complex species
-        sub_mols = re.split(r"(?<=[)])\.", tok)
+        sub_mols = _RE_COMPLEX_SPLIT.split(tok)
         if len(sub_mols) > 1:
             parts = [_state_qualified_name(s) for s in sub_mols]
             names.append(":".join(parts))
@@ -311,10 +317,11 @@ def _state_qualified_name(pattern: str) -> str:
     Ignores bond markers (!N, !+, !?).
     """
     pattern = pattern.strip()
-    m = re.match(r"(\w+)\(([^)]*)\)", pattern)
+    m = _RE_MOL_SITES.match(pattern)
     if not m:
         # Bare name or malformed
-        return re.match(r"(\w+)", pattern).group(1) if re.match(r"(\w+)", pattern) else ""
+        m_word = _RE_WORD.match(pattern)
+        return m_word.group(1) if m_word else ""
 
     mol_name = m.group(1)
     sites_str = m.group(2).strip()
@@ -329,7 +336,7 @@ def _state_qualified_name(pattern: str) -> str:
         if not site_token:
             continue
         # Remove bond markers
-        site_token = re.sub(r"![^\s,)~]*", "", site_token).strip()
+        site_token = _RE_BOND_MARKERS.sub("", site_token).strip()
         parts = site_token.split("~")
         if len(parts) >= 2:
             # Site with a specific state: Y705~u → Y705_u
