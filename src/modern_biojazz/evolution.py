@@ -147,11 +147,9 @@ class LLMEvolutionEngine:
         return network.copy()
 
     def _network_fingerprint(self, network: ReactionNetwork) -> str:
-        proteins = sorted(network.proteins)
-        rules = sorted(
-            [f"{r.rule_type}:{'+'.join(r.reactants)}->{'+'.join(r.products)}@{r.rate:.6g}" for r in network.rules]
-        )
-        return json.dumps({"proteins": proteins, "rules": rules}, sort_keys=True)
+        proteins = "|".join(sorted(network.proteins))
+        rules = "|".join(sorted([r.fingerprint for r in network.rules]))
+        return f"{proteins}||{rules}"
 
     def _evaluate(self, network: ReactionNetwork, config: EvolutionConfig) -> float:
         try:

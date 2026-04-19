@@ -31,6 +31,12 @@ class Rule:
     products: List[str]
     rate: float
 
+    @property
+    def fingerprint(self) -> str:
+        if not hasattr(self, "_fp_str"):
+            self._fp_str = f"{self.rule_type}:{'+'.join(self.reactants)}->{'+'.join(self.products)}@{self.rate:.6g}"
+        return self._fp_str
+
 
 @dataclass
 class ReactionNetwork:
