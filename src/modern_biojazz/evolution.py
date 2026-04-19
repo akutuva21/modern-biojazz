@@ -106,13 +106,29 @@ class LLMEvolutionEngine:
             f"rules_preview={preview_rules}"
         )
 
-    def _mutate_candidate(self, network: ReactionNetwork, budget: int) -> ReactionNetwork:
+    def _mutate_candidate(
+        self,
+        network: ReactionNetwork,
+        budget: int,
+        precomputed_model_code: str | None = None,
+        precomputed_action_keys: list[str] | None = None,
+    ) -> ReactionNetwork:
         last_child: ReactionNetwork | None = None
         for _ in range(8):
             child = network.copy()
             last_child = child
+
+            # Use precomputed values if provided (optimization for bulk generation from identical seed)
+            model_code = precomputed_model_code if precomputed_model_code is not None else self._model_code(child)
+            if precomputed_action_keys is not None:
+                action_keys = precomputed_action_keys
+            else:
+                action_keys = list(self.mutator.action_library(child).keys())
+
+            choices = self.proposer.propose(model_code, action_keys, budget)
+
+            # We still need the action library dictionary to apply the chosen actions
             actions = self.mutator.action_library(child)
-            choices = self.proposer.propose(self._model_code(child), list(actions.keys()), budget)
             for action_name in choices:
                 action = actions.get(action_name)
                 if action is not None:
@@ -183,9 +199,19 @@ class LLMEvolutionEngine:
 
     def run(self, seed: ReactionNetwork, config: EvolutionConfig) -> EvolutionResult:
         islands: List[List[ReactionNetwork]] = []
+
+        # Precompute constants for initial population generation to avoid redundant work
+        seed_model_code = self._model_code(seed)
+        seed_action_keys = list(self.mutator.action_library(seed).keys())
+
         for _ in range(max(1, config.islands)):
             island_pop = [seed.copy()] + [
-                self._mutate_candidate(seed, config.mutations_per_candidate)
+                self._mutate_candidate(
+                    seed,
+                    config.mutations_per_candidate,
+                    precomputed_model_code=seed_model_code,
+                    precomputed_action_keys=seed_action_keys,
+                )
                 for _ in range(max(0, config.population_size - 1))
             ]
             islands.append(island_pop)
