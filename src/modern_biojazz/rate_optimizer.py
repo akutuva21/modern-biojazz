@@ -135,6 +135,59 @@ def _initialize_population(
     return population
 
 
+def _process_generation(
+    population: List[List[float]],
+    scores: List[float],
+    n_dim: int,
+    pop_size: int,
+    lb: float,
+    ub: float,
+    cfg: DEConfig,
+    rng: random.Random,
+    evaluate: Callable[[List[float]], float],
+    best_score: float,
+    best_x: List[float],
+    n_eval: int,
+) -> tuple[float, List[float], int]:
+    """Process a single generation of the DE loop."""
+    for i in range(pop_size):
+        if n_eval >= cfg.max_eval:
+            break
+
+        trial = _mutate_and_crossover(
+            i, population, n_dim, pop_size, lb, ub, cfg, rng
+        )
+
+        trial_score = evaluate(trial)
+        n_eval += 1
+
+        # Greedy selection (maximize).
+        if trial_score >= scores[i]:
+            population[i] = trial
+            scores[i] = trial_score
+
+            if trial_score > best_score:
+                best_score = trial_score
+                best_x = list(trial)
+
+    return best_score, best_x, n_eval
+
+
+def _update_stagnation(
+    best_score: float,
+    prev_best: float,
+    stagnant: int,
+    ftol: float,
+) -> tuple[int, float]:
+    """Update convergence stagnation counter."""
+    if abs(best_score - prev_best) < ftol:
+        stagnant += 1
+    else:
+        stagnant = 0
+    prev_best = best_score
+    return stagnant, prev_best
+
+
 def _run_de_loop(
     population: List[List[float]],
     n_dim: int,
@@ -161,34 +214,27 @@ def _run_de_loop(
     while n_eval < cfg.max_eval:
         generation += 1
 
-        for i in range(pop_size):
-            if n_eval >= cfg.max_eval:
-                break
-
-            trial = _mutate_and_crossover(
-                i, population, n_dim, pop_size, lb, ub, cfg, rng
-            )
-
-            trial_score = evaluate(trial)
-            n_eval += 1
-
-            # Greedy selection (maximize).
-            if trial_score >= scores[i]:
-                population[i] = trial
-                scores[i] = trial_score
-
-                if trial_score > best_score:
-                    best_score = trial_score
-                    best_x = list(trial)
+        best_score, best_x, n_eval = _process_generation(
+            population,
+            scores,
+            n_dim,
+            pop_size,
+            lb,
+            ub,
+            cfg,
+            rng,
+            evaluate,
+            best_score,
+            best_x,
+            n_eval,
+        )
 
         history.append(best_score)
 
         # Convergence check.
-        if abs(best_score - prev_best) < cfg.ftol:
-            stagnant += 1
-        else:
-            stagnant = 0
-        prev_best = best_score
+        stagnant, prev_best = _update_stagnation(
+            best_score, prev_best, stagnant, cfg.ftol
+        )
 
         if stagnant >= cfg.patience:
             return DEState(
