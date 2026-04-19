@@ -5,9 +5,8 @@ import json
 import math
 import socket
 import time
-import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Protocol
 
 from .site_graph import ReactionNetwork
