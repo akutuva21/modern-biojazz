@@ -112,7 +112,8 @@ class INDRAAssembler:
         """Try INDRA's Python BnglAssembler first; fall back to manual assembly."""
         try:
             return self._assemble_via_indra_lib(raw_statements)
-        except ImportError:
+        except Exception:
+            # Fallback for version incompatibilities
             return self._assemble_manual(raw_statements, species)
 
     def _assemble_via_indra_lib(self, raw_statements: List[Dict[str, Any]]) -> str:

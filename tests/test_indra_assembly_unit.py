@@ -19,7 +19,8 @@ def test_indra_graph_proposer_success(mock_urlopen):
             {
                 "type": "Phosphorylation",
                 "enz": {"name": "JAK2"},
-                "sub": {"name": "STAT3"}
+                "sub": {"name": "STAT3"},
+                "agents": [{"name": "JAK2"}, {"name": "STAT3"}]
             }
         ]
     }
@@ -130,3 +131,32 @@ def test_load_assembly_snapshot_file_not_found():
     with patch("builtins.open", side_effect=FileNotFoundError):
         with pytest.raises(FileNotFoundError):
             load_assembly_snapshot("non_existent_path.json")
+
+def test_assemble_bngl_generic_exception_fallback():
+    """Test that INDRAAssembler._assemble_bngl falls back to manual assembly on generic Exception."""
+    from modern_biojazz.indra_assembly import INDRAAssembler
+    import unittest.mock as mock
+
+    assembler = INDRAAssembler()
+    # Mock _assemble_via_indra_lib to throw a generic Exception
+    with mock.patch.object(assembler, "_assemble_via_indra_lib", side_effect=Exception("Generic Error")):
+        raw_statements = [
+            {
+                "type": "Phosphorylation",
+                "enz": {"name": "JAK2"},
+                "sub": {"name": "STAT3"},
+                "agents": [{"name": "JAK2"}, {"name": "STAT3"}]
+            }
+        ]
+        species = ["JAK2", "STAT3"]
+
+        # It should catch the Exception and fall back to manual assembly
+        bngl_text = assembler._assemble_bngl(raw_statements, species)
+
+        # Verify it fell back and produced valid BNGL
+        assert "begin model" in bngl_text
+        assert "begin molecule types" in bngl_text
+        assert "JAK2()" in bngl_text
+        # Check that the manual assembly parsed the rules
+        assert "STAT3(phospho~u~p)" in bngl_text
+        assert "JAK2() + STAT3(phospho~u) -> JAK2() + STAT3(phospho~p)" in bngl_text
