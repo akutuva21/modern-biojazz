@@ -70,37 +70,37 @@ class ModernBioJazzPipeline:
         def _base_protein(token: str) -> str:
             """Strip derived suffixes to find the base protein name.
             Handles compound suffixes like STAT3_dup42_P."""
-            if token in _base_cache:
+            try:
                 return _base_cache[token]
+            except KeyError:
+                orig_token = token
+                if "_dup" in token:
+                    token = token[: token.index("_dup")]
+                else:
+                    token = suffix_pattern.sub("", token)
 
-            orig_token = token
-            if "_dup" in token:
-                token = token[: token.index("_dup")]
-            else:
-                token = suffix_pattern.sub("", token)
-
-            _base_cache[orig_token] = token
-            return token
+                _base_cache[orig_token] = token
+                return token
 
         _allowed_cache: Dict[str, bool] = {}
 
         def _is_allowed_token(token: str) -> bool:
-            if token in _allowed_cache:
+            try:
                 return _allowed_cache[token]
-
-            result = False
-            if token in allowed_symbols:
-                result = True
-            else:
-                base = _base_protein(token)
-                if base in allowed_symbols:
+            except KeyError:
+                result = False
+                if token in allowed_symbols:
                     result = True
-                elif ":" in token:
-                    parts = token.split(":")
-                    result = all(_base_protein(part) in allowed_symbols for part in parts)
+                else:
+                    base = _base_protein(token)
+                    if base in allowed_symbols:
+                        result = True
+                    elif ":" in token:
+                        parts = token.split(":")
+                        result = all(_base_protein(part) in allowed_symbols for part in parts)
 
-            _allowed_cache[token] = result
-            return result
+                _allowed_cache[token] = result
+                return result
 
         def _filter(network: ReactionNetwork) -> bool:
             for pname in network.proteins:
