@@ -36,15 +36,24 @@ class OpenAICompatibleProposer:
         if not hostname:
             raise ValueError("Invalid hostname in URL")
         try:
-            ip = socket.gethostbyname(hostname)
+            addr_info = socket.getaddrinfo(hostname, None)
         except socket.gaierror as e:
             raise ValueError(f"Could not resolve hostname {hostname}: {e}")
-        try:
-            ip_obj = ipaddress.ip_address(ip)
-        except ValueError as e:
-            raise ValueError(f"Invalid IP address resolved {ip}: {e}")
-        if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_link_local or ip_obj.is_multicast:
-            raise ValueError(f"URL resolves to an internal or reserved IP address: {ip}")
+
+        for _, _, _, _, sockaddr in addr_info:
+            ip = sockaddr[0]
+            try:
+                ip_obj = ipaddress.ip_address(ip)
+            except ValueError as e:
+                raise ValueError(f"Invalid IP address resolved {ip}: {e}")
+            if (
+                ip_obj.is_private
+                or ip_obj.is_loopback
+                or ip_obj.is_link_local
+                or ip_obj.is_multicast
+                or ip_obj.is_reserved
+            ):
+                raise ValueError(f"URL resolves to an internal or reserved IP address: {ip}")
 
     def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
         self._validate_url(self.base_url)

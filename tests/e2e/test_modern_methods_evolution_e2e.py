@@ -13,7 +13,7 @@ from modern_biojazz.llm_proposer import LLMDenoisingProposer, OpenAICompatiblePr
 from modern_biojazz.neural_diffusion import DDPMContactMapTrainer
 
 
-@patch("urllib.request.urlopen")
+@patch("urllib.request.OpenerDirector.open")
 def test_evolution_with_indra_proposer_e2e(mock_urlopen):
     """
     Robust E2E test to verify that the INDRAGraphProposer functions
@@ -176,7 +176,7 @@ def test_structural_crossover_e2e_island_model():
     assert "Substrate_Y" in child.proteins or "Inhibitor_Z" in child.proteins
 
 
-@patch("urllib.request.urlopen")
+@patch("urllib.request.OpenerDirector.open")
 def test_indra_proposer_graceful_fallback_e2e(mock_urlopen):
     """
     Test 5: Verify the INDRA Proposer gracefully recovers and falls back to standard
@@ -218,7 +218,7 @@ def test_indra_proposer_graceful_fallback_e2e(mock_urlopen):
     assert len(result.best_network.proteins) >= 1
 
 
-@patch("urllib.request.urlopen")
+@patch("urllib.request.OpenerDirector.open")
 def test_indra_proposer_phosphorylation_mek_erk_e2e(mock_urlopen):
     """
     Test 6: Verify INDRA Proposer correctly extracts Phosphorylation statements
@@ -393,7 +393,7 @@ def test_structural_crossover_complex_sites_egfr_grb2_e2e():
         assert len(child.proteins["Grb2"].sites) == 2
 
 
-@patch("urllib.request.urlopen")
+@patch("urllib.request.OpenerDirector.open")
 def test_indra_proposer_activation_caspase_e2e(mock_urlopen):
     """
     Test 10: Verify INDRA Proposer correctly extracts Activation statements
