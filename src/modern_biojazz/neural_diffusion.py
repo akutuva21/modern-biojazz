@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import random
 from modern_biojazz.site_graph import ReactionNetwork, Protein, Rule
 
 class SimpleContactMapDenoiser(nn.Module):
