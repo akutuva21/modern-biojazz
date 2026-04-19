@@ -297,7 +297,7 @@ class GraphMutator:
 
     def crossover(self, net1: ReactionNetwork, net2: ReactionNetwork) -> ReactionNetwork:
         """Structural crossover of two networks. Returns a new child network."""
-        import copy
+        from .site_graph import Protein, Site, Rule
 
         child = net1.copy()
         if not net2.proteins:
@@ -307,7 +307,17 @@ class GraphMutator:
         proteins_to_copy = self.rng.sample(list(net2.proteins), k=max(1, len(net2.proteins) // 2))
         for p_name in proteins_to_copy:
             if p_name not in child.proteins:
-                child.proteins[p_name] = copy.deepcopy(net2.proteins[p_name])
+                p = net2.proteins[p_name]
+                new_sites = [
+                    Site(
+                        name=s.name,
+                        site_type=s.site_type,
+                        states=s.states.copy(),
+                        allowed_partners=s.allowed_partners.copy()
+                    )
+                    for s in p.sites
+                ]
+                child.proteins[p_name] = Protein(name=p.name, sites=new_sites)
 
         def all_bases_present(tokens: list[str]) -> bool:
             for t in tokens:
@@ -320,11 +330,21 @@ class GraphMutator:
                         return False
             return True
 
+        child_rule_names = {r.name for r in child.rules}
+
         # Copy over rules whose proteins are present in child
         for rule in net2.rules:
             if self.rng.random() < 0.5 and all_bases_present(rule.reactants) and all_bases_present(rule.products):
-                if not any(r.name == rule.name for r in child.rules):
-                    child.rules.append(copy.deepcopy(rule))
+                if rule.name not in child_rule_names:
+                    new_rule = Rule(
+                        name=rule.name,
+                        rule_type=rule.rule_type,
+                        reactants=rule.reactants.copy(),
+                        products=rule.products.copy(),
+                        rate=rule.rate
+                    )
+                    child.rules.append(new_rule)
+                    child_rule_names.add(rule.name)
 
         return child
 
