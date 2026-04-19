@@ -1,5 +1,19 @@
+import pytest
 from unittest.mock import patch, MagicMock
-from modern_biojazz.indra_assembly import INDRAGraphProposer
+from modern_biojazz.indra_assembly import INDRAGraphProposer, load_bngl_file
+
+def test_load_bngl_file_success(fixtures_dir):
+    path = fixtures_dir / "sample_indra.bngl"
+    result = load_bngl_file(path)
+
+    assert result.source == "file"
+    assert result.species == []
+    assert result.statements == []
+    assert "begin model" in result.bngl_text
+
+def test_load_bngl_file_not_found():
+    with pytest.raises(FileNotFoundError):
+        load_bngl_file("non_existent_file.bngl")
 
 @patch("urllib.request.urlopen")
 def test_indra_graph_proposer_success(mock_urlopen):
