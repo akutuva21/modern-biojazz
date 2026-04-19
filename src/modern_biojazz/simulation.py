@@ -7,7 +7,7 @@ import socket
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Protocol
 
 from .site_graph import ReactionNetwork
@@ -26,8 +26,7 @@ class SimulationBackend(Protocol):
         self,
         network: ReactionNetwork,
         options: SimulationOptions,
-    ) -> Dict[str, Any]:
-        ...
+    ) -> Dict[str, Any]: ...
 
 
 class FitnessScorer(Protocol):
@@ -41,8 +40,7 @@ class FitnessScorer(Protocol):
         dt: float = 1.0,
         solver: str = "Rodas5P",
         initial_conditions: Dict[str, float] | None = None,
-    ) -> float:
-        ...
+    ) -> float: ...
 
 
 @dataclass
@@ -342,7 +340,9 @@ class UltrasensitiveFitnessEvaluator:
             series = result.get("trajectory", [])
             final = 0.0
             if series:
-                final = float(series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0)))
+                final = float(
+                    series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0))
+                )
             responses.append(max(1e-8, final))
 
         lo = responses[0]
