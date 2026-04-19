@@ -1,4 +1,5 @@
 import json
+import pytest
 from pathlib import Path
 from modern_biojazz.pathway_discovery import (
     PathwayDiscoveryResult,
@@ -41,3 +42,28 @@ def test_load_discovery_snapshot_missing_source(tmp_path: Path):
     assert loaded_result.species == data["species"]
     assert loaded_result.interactions == data["interactions"]
     assert loaded_result.source == "snapshot"
+
+def test_load_discovery_snapshot_file_not_found():
+    with pytest.raises(FileNotFoundError):
+        load_discovery_snapshot("non_existent_file.json")
+
+def test_load_discovery_snapshot_invalid_json(tmp_path: Path):
+    file_path = tmp_path / "invalid.json"
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write("{ invalid json")
+
+    with pytest.raises(json.JSONDecodeError):
+        load_discovery_snapshot(str(file_path))
+
+def test_load_discovery_snapshot_missing_keys(tmp_path: Path):
+    data = {
+        "species": ["X", "Y", "Z"],
+        "interactions": []
+    }
+
+    file_path = tmp_path / "missing_keys.json"
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+    with pytest.raises(KeyError, match="seed_genes"):
+        load_discovery_snapshot(str(file_path))
