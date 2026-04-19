@@ -1,5 +1,12 @@
-from unittest.mock import patch, MagicMock
-from modern_biojazz.indra_assembly import INDRAGraphProposer
+import json
+from unittest.mock import patch, MagicMock, mock_open
+import pytest
+from modern_biojazz.indra_assembly import (
+    AssemblyResult,
+    INDRAGraphProposer,
+    load_assembly_snapshot,
+    save_assembly_snapshot,
+)
 
 @patch("urllib.request.urlopen")
 def test_indra_graph_proposer_success(mock_urlopen):
@@ -54,11 +61,7 @@ def test_indra_graph_proposer_fallback_no_proteins():
     # Should fallback gracefully
     assert actions == ["add_site"]
 
-
 def test_save_assembly_snapshot_success(tmp_path):
-    from modern_biojazz.indra_assembly import AssemblyResult, save_assembly_snapshot
-    import json
-
     result = AssemblyResult(
         species=["STAT3"],
         statements=[{"type": "Phosphorylation", "enz": "JAK2", "sub": "STAT3"}],
@@ -78,3 +81,52 @@ def test_save_assembly_snapshot_success(tmp_path):
     assert data["statements"][0]["type"] == "Phosphorylation"
     assert data["bngl_text"] == "begin model\nend model"
     assert data["source"] == "indra_live"
+
+def test_load_assembly_snapshot_success():
+    """Test loading a fully populated assembly snapshot."""
+    mock_data = {
+        "species": ["STAT3"],
+        "statements": [{"type": "Phosphorylation", "enz": {"name": "JAK2"}, "sub": {"name": "STAT3"}}],
+        "bngl_text": "begin model\\nend model",
+        "source": "indra_live"
+    }
+    mock_json = json.dumps(mock_data)
+
+    with patch("builtins.open", mock_open(read_data=mock_json)):
+        result = load_assembly_snapshot("dummy_path.json")
+
+    assert result.species == ["STAT3"]
+    assert len(result.statements) == 1
+    assert result.statements[0]["type"] == "Phosphorylation"
+    assert result.bngl_text == "begin model\\nend model"
+    assert result.source == "indra_live"
+
+def test_load_assembly_snapshot_missing_optional_fields():
+    """Test loading an assembly snapshot where optional fields like statements and source are missing."""
+    mock_data = {
+        "species": ["STAT3"],
+        "bngl_text": "begin model\\nend model"
+    }
+    mock_json = json.dumps(mock_data)
+
+    with patch("builtins.open", mock_open(read_data=mock_json)):
+        result = load_assembly_snapshot("dummy_path.json")
+
+    assert result.species == ["STAT3"]
+    assert result.statements == [] # default value
+    assert result.bngl_text == "begin model\\nend model"
+    assert result.source == "file" # default value
+
+def test_load_assembly_snapshot_invalid_json():
+    """Test loading an assembly snapshot with invalid JSON content."""
+    invalid_json = "{ invalid json data"
+
+    with patch("builtins.open", mock_open(read_data=invalid_json)):
+        with pytest.raises(json.JSONDecodeError):
+            load_assembly_snapshot("dummy_path.json")
+
+def test_load_assembly_snapshot_file_not_found():
+    """Test loading an assembly snapshot where the file does not exist."""
+    with patch("builtins.open", side_effect=FileNotFoundError):
+        with pytest.raises(FileNotFoundError):
+            load_assembly_snapshot("non_existent_path.json")
