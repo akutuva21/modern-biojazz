@@ -217,7 +217,9 @@ class BNGPlaygroundBackend:
         last_response: Dict[str, Any] = {}
         for line in reversed(lines):
             line = line.strip()
-            if not line:
+            # Fast path: skip empty lines and obvious non-JSON lines
+            # and lines that don't even contain the "result" string
+            if not line or not line.startswith("{") or not line.endswith("}") or '"result"' not in line:
                 continue
 
             try:
