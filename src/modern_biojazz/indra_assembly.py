@@ -232,37 +232,10 @@ class INDRAGraphProposer:
     assembler: INDRAAssembler = field(default_factory=INDRAAssembler)
     rng: random.Random = field(default_factory=random.Random)
 
-    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
-        # Parse available proteins from model_code (format: '...proteins=['A', 'B'];...')
-        proteins = []
-        try:
-            import re
-            m = re.search(r"proteins=\[(.*?)\]", model_code)
-            if m:
-                raw = m.group(1).replace("'", "").replace('"', "").split(",")
-                proteins = [p.strip() for p in raw if p.strip() and not p.strip().startswith("M_")]
-        except Exception as e:
-            logger.warning("Failed to parse proteins from model_code: %s", e)
+    def _fallback_proposals(self, action_names: List[str], budget: int) -> List[str]:
+        return [self.rng.choice(action_names) for _ in range(max(1, budget))]
 
-        proteins = [p for p in proteins if p not in ['0', 'Trash']]
-
-        if not proteins:
-            return [self.rng.choice(action_names) for _ in range(max(1, budget))]
-
-        target = self.rng.choice(proteins)
-
-        # Query INDRA for statements involving this target
-        # For speed, we just grab 5 statements of a random type
-        stmt_type = self.rng.choice(["Phosphorylation", "Complex", "Activation"])
-        statements = self.assembler._query_db_rest([target], stmt_type)
-
-        if not statements:
-            # Fallback
-            return [self.rng.choice(action_names) for _ in range(max(1, budget))]
-
-        stmt = self.rng.choice(statements)
-
-        # Extract agents from statement
+    def _extract_agent_names(self, stmt: Dict[str, Any]) -> List[str]:
         agents = stmt.get("agents") or stmt.get("members") or []
         if not agents:
             sub = stmt.get("sub") or stmt.get("subj") or stmt.get("enz")
@@ -278,9 +251,59 @@ class INDRAGraphProposer:
                     new_names.append(n)
             elif isinstance(a, str):
                 new_names.append(a)
+        return new_names
+
+    def _build_proposals(self, stmt_type: str, action_names: List[str], budget: int) -> List[str]:
+        proposals = []
+        if stmt_type == "Phosphorylation" and "add_phosphorylation" in action_names:
+            proposals.append("add_phosphorylation")
+        elif stmt_type == "Complex" and "add_binding" in action_names:
+            proposals.append("add_binding")
+        elif stmt_type in ("Activation", "Inhibition") and "add_site" in action_names:
+            proposals.append("add_site")
+
+        while len(proposals) < budget:
+            proposals.append(self.rng.choice(action_names))
+
+        return proposals[:budget]
+
+    def _parse_proteins(self, model_code: str) -> List[str]:
+        # Parse available proteins from model_code (format: '...proteins=['A', 'B'];...')
+        proteins = []
+        try:
+            import re
+            m = re.search(r"proteins=\[(.*?)\]", model_code)
+            if m:
+                raw = m.group(1).replace("'", "").replace('"', "").split(",")
+                proteins = [p.strip() for p in raw if p.strip() and not p.strip().startswith("M_")]
+        except Exception as e:
+            logger.warning("Failed to parse proteins from model_code: %s", e)
+
+        proteins = [p for p in proteins if p not in ['0', 'Trash']]
+        return proteins
+
+    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
+        proteins = self._parse_proteins(model_code)
+
+        if not proteins:
+            return self._fallback_proposals(action_names, budget)
+
+        target = self.rng.choice(proteins)
+
+        # Query INDRA for statements involving this target
+        # For speed, we just grab 5 statements of a random type
+        stmt_type = self.rng.choice(["Phosphorylation", "Complex", "Activation"])
+        statements = self.assembler._query_db_rest([target], stmt_type)
+
+        if not statements:
+            # Fallback
+            return self._fallback_proposals(action_names, budget)
+
+        stmt = self.rng.choice(statements)
+        new_names = self._extract_agent_names(stmt)
 
         if len(new_names) < 2:
-            return [self.rng.choice(action_names) for _ in range(max(1, budget))]
+            return self._fallback_proposals(action_names, budget)
 
         # We now have a real interaction (e.g. ['JAK2', 'STAT3']).
         # Because the proposer API expects *action names*, we would ideally return
@@ -296,18 +319,7 @@ class INDRAGraphProposer:
         # library. For simplicity in this interface constraint, we just map the INDRA
         # statement type to the closest BioJazz mutation action.
 
-        proposals = []
-        if stmt_type == "Phosphorylation" and "add_phosphorylation" in action_names:
-            proposals.append("add_phosphorylation")
-        elif stmt_type == "Complex" and "add_binding" in action_names:
-            proposals.append("add_binding")
-        elif stmt_type in ("Activation", "Inhibition") and "add_site" in action_names:
-            proposals.append("add_site")
-
-        while len(proposals) < budget:
-            proposals.append(self.rng.choice(action_names))
-
-        return proposals[:budget]
+        return self._build_proposals(stmt_type, action_names, budget)
 
     def record_feedback(self, score: float, notes: str) -> None:
         pass
