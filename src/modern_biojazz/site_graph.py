@@ -31,6 +31,10 @@ class Rule:
     products: List[str]
     rate: float
 
+    @property
+    def fingerprint(self) -> str:
+        return f"{self.rule_type}:{'+'.join(self.reactants)}->{'+'.join(self.products)}@{self.rate:.6g}"
+
 
 @dataclass
 class ReactionNetwork:
