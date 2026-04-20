@@ -41,7 +41,7 @@ def test_safe_filter_proposer_propagates_feedback():
 
 
 @patch("modern_biojazz.llm_proposer.OpenAICompatibleProposer._validate_url")
-@patch("urllib.request.urlopen")
+@patch("modern_biojazz.llm_proposer.urlopen")
 def test_llm_denoising_proposer(mock_urlopen, mock_validate):
     # Mock the LLM response
     mock_response = MagicMock()

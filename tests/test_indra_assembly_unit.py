@@ -1,5 +1,12 @@
-from unittest.mock import patch, MagicMock
-from modern_biojazz.indra_assembly import INDRAGraphProposer
+import json
+from unittest.mock import patch, MagicMock, mock_open
+import pytest
+from modern_biojazz.indra_assembly import (
+    AssemblyResult,
+    INDRAGraphProposer,
+    load_assembly_snapshot,
+    save_assembly_snapshot,
+)
 
 @patch("urllib.request.urlopen")
 def test_indra_graph_proposer_success(mock_urlopen):
@@ -12,7 +19,8 @@ def test_indra_graph_proposer_success(mock_urlopen):
             {
                 "type": "Phosphorylation",
                 "enz": {"name": "JAK2"},
-                "sub": {"name": "STAT3"}
+                "sub": {"name": "STAT3"},
+                "agents": [{"name": "JAK2"}, {"name": "STAT3"}]
             }
         ]
     }
@@ -53,3 +61,102 @@ def test_indra_graph_proposer_fallback_no_proteins():
 
     # Should fallback gracefully
     assert actions == ["add_site"]
+
+def test_save_assembly_snapshot_success(tmp_path):
+    result = AssemblyResult(
+        species=["STAT3"],
+        statements=[{"type": "Phosphorylation", "enz": "JAK2", "sub": "STAT3"}],
+        bngl_text="begin model\nend model",
+        source="indra_live"
+    )
+
+    file_path = tmp_path / "snapshot.json"
+    save_assembly_snapshot(result, file_path)
+
+    assert file_path.exists()
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert data["species"] == ["STAT3"]
+    assert data["statements"][0]["type"] == "Phosphorylation"
+    assert data["bngl_text"] == "begin model\nend model"
+    assert data["source"] == "indra_live"
+
+def test_load_assembly_snapshot_success():
+    """Test loading a fully populated assembly snapshot."""
+    mock_data = {
+        "species": ["STAT3"],
+        "statements": [{"type": "Phosphorylation", "enz": {"name": "JAK2"}, "sub": {"name": "STAT3"}}],
+        "bngl_text": "begin model\\nend model",
+        "source": "indra_live"
+    }
+    mock_json = json.dumps(mock_data)
+
+    with patch("builtins.open", mock_open(read_data=mock_json)):
+        result = load_assembly_snapshot("dummy_path.json")
+
+    assert result.species == ["STAT3"]
+    assert len(result.statements) == 1
+    assert result.statements[0]["type"] == "Phosphorylation"
+    assert result.bngl_text == "begin model\\nend model"
+    assert result.source == "indra_live"
+
+def test_load_assembly_snapshot_missing_optional_fields():
+    """Test loading an assembly snapshot where optional fields like statements and source are missing."""
+    mock_data = {
+        "species": ["STAT3"],
+        "bngl_text": "begin model\\nend model"
+    }
+    mock_json = json.dumps(mock_data)
+
+    with patch("builtins.open", mock_open(read_data=mock_json)):
+        result = load_assembly_snapshot("dummy_path.json")
+
+    assert result.species == ["STAT3"]
+    assert result.statements == [] # default value
+    assert result.bngl_text == "begin model\\nend model"
+    assert result.source == "file" # default value
+
+def test_load_assembly_snapshot_invalid_json():
+    """Test loading an assembly snapshot with invalid JSON content."""
+    invalid_json = "{ invalid json data"
+
+    with patch("builtins.open", mock_open(read_data=invalid_json)):
+        with pytest.raises(json.JSONDecodeError):
+            load_assembly_snapshot("dummy_path.json")
+
+def test_load_assembly_snapshot_file_not_found():
+    """Test loading an assembly snapshot where the file does not exist."""
+    with patch("builtins.open", side_effect=FileNotFoundError):
+        with pytest.raises(FileNotFoundError):
+            load_assembly_snapshot("non_existent_path.json")
+
+def test_assemble_bngl_generic_exception_fallback():
+    """Test that INDRAAssembler._assemble_bngl falls back to manual assembly on generic Exception."""
+    from modern_biojazz.indra_assembly import INDRAAssembler
+    import unittest.mock as mock
+
+    assembler = INDRAAssembler()
+    # Mock _assemble_via_indra_lib to throw a generic Exception
+    with mock.patch.object(assembler, "_assemble_via_indra_lib", side_effect=Exception("Generic Error")):
+        raw_statements = [
+            {
+                "type": "Phosphorylation",
+                "enz": {"name": "JAK2"},
+                "sub": {"name": "STAT3"},
+                "agents": [{"name": "JAK2"}, {"name": "STAT3"}]
+            }
+        ]
+        species = ["JAK2", "STAT3"]
+
+        # It should catch the Exception and fall back to manual assembly
+        bngl_text = assembler._assemble_bngl(raw_statements, species)
+
+        # Verify it fell back and produced valid BNGL
+        assert "begin model" in bngl_text
+        assert "begin molecule types" in bngl_text
+        assert "JAK2()" in bngl_text
+        # Check that the manual assembly parsed the rules
+        assert "STAT3(phospho~u~p)" in bngl_text
+        assert "JAK2() + STAT3(phospho~u) -> JAK2() + STAT3(phospho~p)" in bngl_text

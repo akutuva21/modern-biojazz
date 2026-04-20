@@ -30,6 +30,32 @@ def test_parse_bngl_error(mock_isdir):
         mock_call_mcp.assert_called_once_with("parse_bngl", {"bngl": sample_bngl})
 
 @patch('os.path.isdir', return_value=True)
+def test_parse_bngl_missing_block_error(mock_isdir):
+    """Test parse_bngl raises BNGLParsingError for malformed code missing blocks."""
+    backend = BNGPlaygroundBackend(bngplayground_path=".")
+    error_message = "Missing 'begin model' block"
+    error_response = {"error": error_message}
+
+    with patch.object(backend, '_call_mcp_tool', return_value=error_response) as mock_call_mcp:
+        sample_bngl = "end model"
+        with pytest.raises(BNGLParsingError) as exc_info:
+            backend.parse_bngl(sample_bngl)
+        assert str(exc_info.value) == error_message
+        mock_call_mcp.assert_called_once_with("parse_bngl", {"bngl": sample_bngl})
+
+@patch('os.path.isdir', return_value=True)
+def test_parse_bngl_empty_response(mock_isdir):
+    """Test parse_bngl returns an empty dictionary when the MCP tool returns one."""
+    backend = BNGPlaygroundBackend(bngplayground_path=".")
+    empty_response = {}
+
+    with patch.object(backend, '_call_mcp_tool', return_value=empty_response) as mock_call_mcp:
+        sample_bngl = ""
+        result = backend.parse_bngl(sample_bngl)
+        assert result == empty_response
+        mock_call_mcp.assert_called_once_with("parse_bngl", {"bngl": sample_bngl})
+
+@patch('os.path.isdir', return_value=True)
 def test_network_to_bngl(mock_isdir):
     """Test the generation of BNGL text from a ReactionNetwork."""
     proteins = {

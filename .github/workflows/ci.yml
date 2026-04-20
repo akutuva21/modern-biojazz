@@ -30,11 +30,14 @@ jobs:
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
+        env:
+          PIP_RETRIES: "10"
+          PIP_TIMEOUT: "60"
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Install package
-        run: pip install -e ".[dev]"
+        run: pip install --retries 10 -e ".[dev]"
 
       - name: Run unit tests
         run: pytest tests/test_*.py -v --tb=short
@@ -52,12 +55,15 @@ jobs:
 
       - name: Set up Python
         uses: actions/setup-python@v5
+        env:
+          PIP_RETRIES: "10"
+          PIP_TIMEOUT: "60"
         with:
           python-version: "3.12"
 
       - name: Install package + mypy
         run: |
-          pip install -e ".[dev]"
+          pip install --retries 10 -e ".[dev]"
           pip install mypy
 
       - name: Run mypy
@@ -73,11 +79,14 @@ jobs:
 
       - name: Set up Python
         uses: actions/setup-python@v5
+        env:
+          PIP_RETRIES: "10"
+          PIP_TIMEOUT: "60"
         with:
           python-version: "3.12"
 
       - name: Install package
-        run: pip install -e ".[dev]"
+        run: pip install --retries 10 -e ".[dev]"
 
       - name: Run BNGL converter tests
         run: pytest tests/test_e2e_pipeline_unit.py -v --tb=short
@@ -112,11 +121,14 @@ jobs:
 
       - name: Set up Python
         uses: actions/setup-python@v5
+        env:
+          PIP_RETRIES: "10"
+          PIP_TIMEOUT: "60"
         with:
           python-version: "3.12"
 
       - name: Install package
-        run: pip install -e ".[dev]"
+        run: pip install --retries 10 -e ".[dev]"
 
       - name: Run full pipeline from snapshots
         run: |
@@ -154,12 +166,15 @@ jobs:
 
       - name: Set up Python
         uses: actions/setup-python@v5
+        env:
+          PIP_RETRIES: "10"
+          PIP_TIMEOUT: "60"
         with:
           python-version: "3.12"
 
       - name: Install package + INDRA
         run: |
-          pip install -e ".[dev]"
+          pip install --retries 10 -e ".[dev]"
           pip install indra || echo "INDRA install failed, manual assembly will be used"
 
       - name: Run live OmniPath discovery
