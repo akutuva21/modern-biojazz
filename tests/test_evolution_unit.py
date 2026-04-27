@@ -48,10 +48,16 @@ def test_llm_evolution_engine_evaluate(seed_network: ReactionNetwork):
     score = engine._evaluate(seed_network, config)
     assert score == 10.0
 
+    # Clear cache to force re-evaluation for exception handling
+    engine._evaluation_cache.clear()
+
     # Test exception handling
     fitness.score.side_effect = Exception("sim error")
     score_err = engine._evaluate(seed_network, config)
     assert score_err == 0.0
+
+    # Clear cache to force re-evaluation for low fitness
+    engine._evaluation_cache.clear()
 
     # Test low fitness
     fitness.score.side_effect = None
