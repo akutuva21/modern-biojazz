@@ -202,9 +202,21 @@ class LLMEvolutionEngine:
         return sum(calc_island_unique(island) for island in islands)
 
     def _evolve_island(
-        self, island_pop: List[ReactionNetwork], best_score: float, config: EvolutionConfig
+        self,
+        island_pop: List[ReactionNetwork],
+        best_score: float,
+        config: EvolutionConfig,
+        eval_cache: dict[str, float],
     ) -> tuple[float, ReactionNetwork | None, List[ReactionNetwork], List[float]]:
-        scored = [(self._evaluate(n, config), n) for n in island_pop]
+        scored: List[tuple[float, ReactionNetwork]] = []
+        for n in island_pop:
+            fp = self._network_fingerprint(n)
+            try:
+                score = eval_cache[fp]
+            except KeyError:
+                score = self._evaluate(n, config)
+                eval_cache[fp] = score
+            scored.append((score, n))
         scored.sort(key=lambda x: x[0], reverse=True)
 
         island_top_scores = [s for s, _ in scored[:3]]
@@ -246,10 +258,19 @@ class LLMEvolutionEngine:
         return islands
 
     def run(self, seed: ReactionNetwork, config: EvolutionConfig) -> EvolutionResult:
+        eval_cache: dict[str, float] = {}
         islands = self._initialize_islands(seed, config)
 
         all_initial = [n for island in islands for n in island]
-        scored_initial = [(self._evaluate(n, config), n) for n in all_initial]
+        scored_initial: List[tuple[float, ReactionNetwork]] = []
+        for n in all_initial:
+            fp = self._network_fingerprint(n)
+            try:
+                score = eval_cache[fp]
+            except KeyError:
+                score = self._evaluate(n, config)
+                eval_cache[fp] = score
+            scored_initial.append((score, n))
         scored_initial.sort(key=lambda x: x[0], reverse=True)
         best_score, best_network = scored_initial[0]
         best = best_network.copy()
@@ -270,7 +291,7 @@ class LLMEvolutionEngine:
             generation_top_scores = []
             for island_idx, island_pop in enumerate(islands):
                 new_best_score, new_best, new_pop, island_top_scores = self._evolve_island(
-                    island_pop, best_score, config
+                    island_pop, best_score, config, eval_cache
                 )
 
                 generation_top_scores.extend(island_top_scores)
