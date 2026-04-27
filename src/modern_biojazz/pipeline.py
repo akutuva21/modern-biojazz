@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import re
 from dataclasses import dataclass
 from typing import Dict, Any
@@ -107,7 +108,7 @@ class ModernBioJazzPipeline:
                 if not _is_allowed_token(pname):
                     return False
             for rule in network.rules:
-                for token in [*rule.reactants, *rule.products]:
+                for token in itertools.chain(rule.reactants, rule.products):
                     if not _is_allowed_token(token):
                         return False
             return True
