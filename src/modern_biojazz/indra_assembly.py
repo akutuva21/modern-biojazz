@@ -4,6 +4,7 @@ Two modes:
   1. Live: query INDRA DB REST API (no key needed) → statements → BNGL text
   2. Offline: load pre-assembled BNGL from file
 """
+
 from __future__ import annotations
 
 import json
@@ -17,14 +18,6 @@ from typing import Any, Dict, List, Optional
 from .utils import save_json_snapshot
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class AssemblyState:
-    mol_types: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
-    params: Dict[str, float] = field(default_factory=dict)
-    rules: List[str] = field(default_factory=list)
-    param_counter: int = 0
 
 
 @dataclass
@@ -89,11 +82,13 @@ class INDRAAssembler:
 
         all_stmts = []
         for s in species:
-            payload = json.dumps({
-                "agent0": s,
-                "stmt_type": stmt_type,
-                "ev_limit": 5,
-            }).encode("utf-8")
+            payload = json.dumps(
+                {
+                    "agent0": s,
+                    "stmt_type": stmt_type,
+                    "ev_limit": 5,
+                }
+            ).encode("utf-8")
 
             req = urllib.request.Request(
                 url=url,
@@ -103,10 +98,7 @@ class INDRAAssembler:
             )
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-                    raw_data = resp.read(10 * 1024 * 1024)
-                    if resp.read(1):
-                        raise ValueError("Response payload exceeded 10MB limit")
-                    data = json.loads(raw_data.decode("utf-8"))
+                    data = json.loads(resp.read().decode("utf-8"))
                     stmts = data.get("statements", data) if isinstance(data, dict) else data
                     if isinstance(stmts, list):
                         all_stmts.extend(stmts)
@@ -123,7 +115,8 @@ class INDRAAssembler:
         """Try INDRA's Python BnglAssembler first; fall back to manual assembly."""
         try:
             return self._assemble_via_indra_lib(raw_statements)
-        except ImportError:
+        except Exception:
+            # Fallback for version incompatibilities
             return self._assemble_manual(raw_statements, species)
 
     def _assemble_via_indra_lib(self, raw_statements: List[Dict[str, Any]]) -> str:
@@ -146,10 +139,15 @@ class INDRAAssembler:
         Produces a valid BNGL file from raw INDRA JSON statements by extracting
         agent names, modification types, and generating mass-action rules.
         """
-        state = AssemblyState()
+        mol_types: Dict[str, Dict[str, List[str]]] = {}  # protein -> {site -> [states]}
+        rules: List[str] = []
+        params: Dict[str, float] = {}
+        param_counter = 0
 
         for s in species:
-            state.mol_types.setdefault(s, {})
+            mol_types.setdefault(s, {})
+
+        ctx = AssemblyContext(mol_types, params, rules, param_counter)
 
         for stmt in raw_statements:
             stype = stmt.get("type", "").lower()
@@ -171,30 +169,30 @@ class INDRAAssembler:
                     continue
                 if name:
                     agent_names.append(name)
-                    state.mol_types.setdefault(name, {})
+                    ctx.mol_types.setdefault(name, {})
 
             if len(agent_names) < 2:
                 continue
 
-            state.param_counter += 1
+            ctx.param_counter += 1
             kinase, substrate = agent_names[0], agent_names[1]
 
             if "phosphorylation" in stype:
-                _handle_phosphorylation(stmt, kinase, substrate, state)
+                _handle_phosphorylation(stmt, kinase, substrate, ctx)
 
             elif "dephosphorylation" in stype:
-                _handle_dephosphorylation(stmt, kinase, substrate, state)
+                _handle_dephosphorylation(stmt, kinase, substrate, ctx)
 
             elif "complex" in stype or "bind" in stype:
-                _handle_complex(stmt, kinase, substrate, state)
+                _handle_complex(stmt, kinase, substrate, ctx)
 
             elif "inhibition" in stype or "decreaseamount" in stype:
-                _handle_inhibition(stmt, kinase, substrate, state)
+                _handle_inhibition(stmt, kinase, substrate, ctx)
 
             elif "activation" in stype or "increaseamount" in stype:
-                _handle_activation(stmt, kinase, substrate, state)
+                _handle_activation(stmt, kinase, substrate, ctx)
 
-        return _render_bngl(state.mol_types, state.params, state.rules, species)
+        return _render_bngl(ctx.mol_types, ctx.params, ctx.rules, species)
 
 
 def load_assembly_snapshot(path: str | Path) -> AssemblyResult:
@@ -240,37 +238,10 @@ class INDRAGraphProposer:
     assembler: INDRAAssembler = field(default_factory=INDRAAssembler)
     rng: random.Random = field(default_factory=random.Random)
 
-    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
-        # Parse available proteins from model_code (format: '...proteins=['A', 'B'];...')
-        proteins = []
-        try:
-            import re
-            m = re.search(r"proteins=\[(.*?)\]", model_code)
-            if m:
-                raw = m.group(1).replace("'", "").replace('"', "").split(",")
-                proteins = [p.strip() for p in raw if p.strip() and not p.strip().startswith("M_")]
-        except Exception as e:
-            logger.warning("Failed to parse proteins from model_code: %s", e)
+    def _fallback_proposals(self, action_names: List[str], budget: int) -> List[str]:
+        return [self.rng.choice(action_names) for _ in range(max(1, budget))]
 
-        proteins = [p for p in proteins if p not in ['0', 'Trash']]
-
-        if not proteins:
-            return [self.rng.choice(action_names) for _ in range(max(1, budget))]
-
-        target = self.rng.choice(proteins)
-
-        # Query INDRA for statements involving this target
-        # For speed, we just grab 5 statements of a random type
-        stmt_type = self.rng.choice(["Phosphorylation", "Complex", "Activation"])
-        statements = self.assembler._query_db_rest([target], stmt_type)
-
-        if not statements:
-            # Fallback
-            return [self.rng.choice(action_names) for _ in range(max(1, budget))]
-
-        stmt = self.rng.choice(statements)
-
-        # Extract agents from statement
+    def _extract_agent_names(self, stmt: Dict[str, Any]) -> List[str]:
         agents = stmt.get("agents") or stmt.get("members") or []
         if not agents:
             sub = stmt.get("sub") or stmt.get("subj") or stmt.get("enz")
@@ -286,9 +257,60 @@ class INDRAGraphProposer:
                     new_names.append(n)
             elif isinstance(a, str):
                 new_names.append(a)
+        return new_names
+
+    def _build_proposals(self, stmt_type: str, action_names: List[str], budget: int) -> List[str]:
+        proposals = []
+        if stmt_type == "Phosphorylation" and "add_phosphorylation" in action_names:
+            proposals.append("add_phosphorylation")
+        elif stmt_type == "Complex" and "add_binding" in action_names:
+            proposals.append("add_binding")
+        elif stmt_type in ("Activation", "Inhibition") and "add_site" in action_names:
+            proposals.append("add_site")
+
+        while len(proposals) < budget:
+            proposals.append(self.rng.choice(action_names))
+
+        return proposals[:budget]
+
+    def _parse_proteins(self, model_code: str) -> List[str]:
+        # Parse available proteins from model_code (format: '...proteins=['A', 'B'];...')
+        proteins = []
+        try:
+            import re
+
+            m = re.search(r"proteins=\[(.*?)\]", model_code)
+            if m:
+                raw = m.group(1).replace("'", "").replace('"', "").split(",")
+                proteins = [p.strip() for p in raw if p.strip() and not p.strip().startswith("M_")]
+        except Exception as e:
+            logger.warning("Failed to parse proteins from model_code: %s", e)
+
+        proteins = [p for p in proteins if p not in ["0", "Trash"]]
+        return proteins
+
+    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
+        proteins = self._parse_proteins(model_code)
+
+        if not proteins:
+            return self._fallback_proposals(action_names, budget)
+
+        target = self.rng.choice(proteins)
+
+        # Query INDRA for statements involving this target
+        # For speed, we just grab 5 statements of a random type
+        stmt_type = self.rng.choice(["Phosphorylation", "Complex", "Activation"])
+        statements = self.assembler._query_db_rest([target], stmt_type)
+
+        if not statements:
+            # Fallback
+            return self._fallback_proposals(action_names, budget)
+
+        stmt = self.rng.choice(statements)
+        new_names = self._extract_agent_names(stmt)
 
         if len(new_names) < 2:
-            return [self.rng.choice(action_names) for _ in range(max(1, budget))]
+            return self._fallback_proposals(action_names, budget)
 
         # We now have a real interaction (e.g. ['JAK2', 'STAT3']).
         # Because the proposer API expects *action names*, we would ideally return
@@ -304,18 +326,7 @@ class INDRAGraphProposer:
         # library. For simplicity in this interface constraint, we just map the INDRA
         # statement type to the closest BioJazz mutation action.
 
-        proposals = []
-        if stmt_type == "Phosphorylation" and "add_phosphorylation" in action_names:
-            proposals.append("add_phosphorylation")
-        elif stmt_type == "Complex" and "add_binding" in action_names:
-            proposals.append("add_binding")
-        elif stmt_type in ("Activation", "Inhibition") and "add_site" in action_names:
-            proposals.append("add_site")
-
-        while len(proposals) < budget:
-            proposals.append(self.rng.choice(action_names))
-
-        return proposals[:budget]
+        return self._build_proposals(stmt_type, action_names, budget)
 
     def record_feedback(self, score: float, notes: str) -> None:
         pass
@@ -324,18 +335,26 @@ class INDRAGraphProposer:
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
+@dataclass
+class AssemblyContext:
+    mol_types: Dict[str, Dict[str, List[str]]]
+    params: Dict[str, float]
+    rules: List[str]
+    param_counter: int
+
+
 def _handle_phosphorylation(
     stmt: Dict[str, Any],
     kinase: str,
     substrate: str,
-    state: AssemblyState
+    ctx: AssemblyContext,
 ) -> None:
     site = _extract_site(stmt) or "phospho"
-    state.mol_types.setdefault(substrate, {})[site] = ["u", "p"]
-    pname = f"kp_{state.param_counter}"
-    state.params[pname] = _extract_belief(stmt) * 0.1
-    state.rules.append(
-        f"  r{state.param_counter}: "
+    ctx.mol_types.setdefault(substrate, {})[site] = ["u", "p"]
+    pname = f"kp_{ctx.param_counter}"
+    ctx.params[pname] = _extract_belief(stmt) * 0.1
+    ctx.rules.append(
+        f"  r{ctx.param_counter}: "
         f"{kinase}() + {substrate}({site}~u) -> "
         f"{kinase}() + {substrate}({site}~p) {pname}"
     )
@@ -345,14 +364,14 @@ def _handle_dephosphorylation(
     stmt: Dict[str, Any],
     kinase: str,
     substrate: str,
-    state: AssemblyState
+    ctx: AssemblyContext,
 ) -> None:
     site = _extract_site(stmt) or "phospho"
-    state.mol_types.setdefault(substrate, {})[site] = ["u", "p"]
-    pname = f"kdp_{state.param_counter}"
-    state.params[pname] = _extract_belief(stmt) * 0.05
-    state.rules.append(
-        f"  r{state.param_counter}: "
+    ctx.mol_types.setdefault(substrate, {})[site] = ["u", "p"]
+    pname = f"kdp_{ctx.param_counter}"
+    ctx.params[pname] = _extract_belief(stmt) * 0.05
+    ctx.rules.append(
+        f"  r{ctx.param_counter}: "
         f"{kinase}() + {substrate}({site}~p) -> "
         f"{kinase}() + {substrate}({site}~u) {pname}"
     )
@@ -362,16 +381,16 @@ def _handle_complex(
     stmt: Dict[str, Any],
     kinase: str,
     substrate: str,
-    state: AssemblyState
+    ctx: AssemblyContext,
 ) -> None:
-    state.mol_types.setdefault(kinase, {}).setdefault(f"b_{substrate}", [])
-    state.mol_types.setdefault(substrate, {}).setdefault(f"b_{kinase}", [])
-    pname_f = f"kf_{state.param_counter}"
-    pname_r = f"kr_{state.param_counter}"
-    state.params[pname_f] = _extract_belief(stmt) * 0.01
-    state.params[pname_r] = 0.1
-    state.rules.append(
-        f"  r{state.param_counter}: "
+    ctx.mol_types.setdefault(kinase, {}).setdefault(f"b_{substrate}", [])
+    ctx.mol_types.setdefault(substrate, {}).setdefault(f"b_{kinase}", [])
+    pname_f = f"kf_{ctx.param_counter}"
+    pname_r = f"kr_{ctx.param_counter}"
+    ctx.params[pname_f] = _extract_belief(stmt) * 0.01
+    ctx.params[pname_r] = 0.1
+    ctx.rules.append(
+        f"  r{ctx.param_counter}: "
         f"{kinase}(b_{substrate}) + {substrate}(b_{kinase}) <-> "
         f"{kinase}(b_{substrate}!1).{substrate}(b_{kinase}!1) {pname_f}, {pname_r}"
     )
@@ -381,13 +400,13 @@ def _handle_inhibition(
     stmt: Dict[str, Any],
     kinase: str,
     substrate: str,
-    state: AssemblyState
+    ctx: AssemblyContext,
 ) -> None:
-    state.mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
-    pname = f"ki_{state.param_counter}"
-    state.params[pname] = _extract_belief(stmt) * 0.05
-    state.rules.append(
-        f"  r{state.param_counter}: "
+    ctx.mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
+    pname = f"ki_{ctx.param_counter}"
+    ctx.params[pname] = _extract_belief(stmt) * 0.05
+    ctx.rules.append(
+        f"  r{ctx.param_counter}: "
         f"{kinase}() + {substrate}(activity~active) -> "
         f"{kinase}() + {substrate}(activity~inactive) {pname}"
     )
@@ -397,13 +416,13 @@ def _handle_activation(
     stmt: Dict[str, Any],
     kinase: str,
     substrate: str,
-    state: AssemblyState
+    ctx: AssemblyContext,
 ) -> None:
-    state.mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
-    pname = f"ka_{state.param_counter}"
-    state.params[pname] = _extract_belief(stmt) * 0.1
-    state.rules.append(
-        f"  r{state.param_counter}: "
+    ctx.mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
+    pname = f"ka_{ctx.param_counter}"
+    ctx.params[pname] = _extract_belief(stmt) * 0.1
+    ctx.rules.append(
+        f"  r{ctx.param_counter}: "
         f"{kinase}() + {substrate}(activity~inactive) -> "
         f"{kinase}() + {substrate}(activity~active) {pname}"
     )
