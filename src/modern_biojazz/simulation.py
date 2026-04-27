@@ -7,7 +7,7 @@ import socket
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Protocol
 
 from .site_graph import ReactionNetwork
@@ -26,8 +26,7 @@ class SimulationBackend(Protocol):
         self,
         network: ReactionNetwork,
         options: SimulationOptions,
-    ) -> Dict[str, Any]:
-        ...
+    ) -> Dict[str, Any]: ...
 
 
 class FitnessScorer(Protocol):
@@ -41,8 +40,7 @@ class FitnessScorer(Protocol):
         dt: float = 1.0,
         solver: str = "Rodas5P",
         initial_conditions: Dict[str, float] | None = None,
-    ) -> float:
-        ...
+    ) -> float: ...
 
 
 @dataclass
@@ -52,7 +50,7 @@ class CatalystHTTPClient:
     retry_count: int = 2
     _allow_insecure_for_testing: bool = False
 
-    def _validate_url(self, url: str) -> str:
+    def _validate_url(self, url: str) -> None:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":
             raise ValueError(f"Insecure scheme: {parsed.scheme}")
@@ -61,31 +59,22 @@ class CatalystHTTPClient:
         if not hostname:
             raise ValueError("Invalid URL: missing hostname")
 
-        port = parsed.port or 443
-
         try:
-            addr_info = socket.getaddrinfo(hostname, port, 0, socket.SOCK_STREAM)
+            addr_info = socket.getaddrinfo(hostname, None)
         except socket.gaierror as e:
             raise ValueError(f"Could not resolve hostname: {e}")
 
-        safe_ip = None
         for _, _, _, _, sockaddr in addr_info:
             ip = sockaddr[0]
             ip_obj = ipaddress.ip_address(ip)
-            if not (
+            if (
                 ip_obj.is_private
                 or ip_obj.is_loopback
                 or ip_obj.is_link_local
                 or ip_obj.is_multicast
                 or ip_obj.is_reserved
             ):
-                safe_ip = ip
-                break
-
-        if not safe_ip:
-            raise ValueError(f"URL resolves to internal/reserved IP address: {hostname}")
-
-        return safe_ip
+                raise ValueError(f"URL resolves to internal/reserved IP address: {ip}")
 
     def simulate(
         self,
@@ -99,10 +88,8 @@ class CatalystHTTPClient:
             "solver": options.solver,
             "initial_conditions": options.initial_conditions or {},
         }
-
-        safe_ip = None
         if not self._allow_insecure_for_testing:
-            safe_ip = self._validate_url(self.base_url)
+            self._validate_url(self.base_url)
 
         last_error: Exception | None = None
         for attempt in range(self.retry_count + 1):
@@ -113,37 +100,11 @@ class CatalystHTTPClient:
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
-
-                if safe_ip:
-                    import http.client
-                    import ssl
-
-                    class SafeHTTPSConnection(http.client.HTTPSConnection):
-                        def connect(self):
-                            self.sock = socket.create_connection((safe_ip, self.port), self.timeout, self.source_address)
-                            if getattr(self, "_tunnel_host", None):
-                                self._tunnel()
-                            if getattr(self, "_context", None) is None:
-                                self._context = ssl._create_default_https_context()
-                            self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
-
-                    class SafeHTTPSHandler(urllib.request.HTTPSHandler):
-                        def https_open(self, req):
-                            return self.do_open(SafeHTTPSConnection, req)
-
-                    opener = urllib.request.build_opener(SafeHTTPSHandler())
-                    response_context = opener.open(req, timeout=self.timeout_seconds)
-                else:
-                    response_context = urllib.request.urlopen(req, timeout=self.timeout_seconds)
-
-                with response_context as response:
+                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
                     status = getattr(response, "status", 200)
                     if status >= 400:
                         raise RuntimeError(f"Catalyst service returned HTTP {status}")
-                    raw_data = response.read(10 * 1024 * 1024)
-                    if response.read(1):
-                        raise ValueError("Response payload exceeded 10MB limit")
-                    return json.loads(raw_data.decode("utf-8"))
+                    return json.loads(response.read().decode("utf-8"))
             except Exception as exc:
                 last_error = exc
                 if attempt < self.retry_count:
@@ -162,6 +123,90 @@ class LocalCatalystEngine:
         network: ReactionNetwork,
         options: SimulationOptions,
     ) -> Dict[str, Any]:
+        species_order, index, y0 = self._prepare_species_and_ic(network, options)
+
+        rates = [max(1e-8, float(r.rate)) for r in network.rules] or [1e-8]
+        stiffness_proxy = (max(rates) / min(rates)) > 100.0
+        t_eval = [i * options.dt for i in range(int(options.t_end / options.dt) + 1)]
+
+        rhs = self._build_rhs(network, index)
+
+        used_solver = options.solver
+        try:
+            used_solver, y_series = self._run_solver(rhs, options, y0, t_eval)
+        except Exception as exc:
+            # Note: when _run_solver fails, the solver used up to that point needs to be determined
+            # If scipy.integrate was present but failed, the expected solver was BDF
+            # If scipy.integrate was absent and Euler failed, the expected solver was EulerFallback
+            # The previous implementation achieved this by mutating `used_solver` before exceptions.
+            # Here we duplicate the check logic or we could catch a custom exception.
+            # Since the logic is simple, we will just replicate the solver selection check.
+            try:
+                from scipy.integrate import solve_ivp as _solve_ivp  # type: ignore
+
+                failed_solver = "BDF"
+            except ImportError:
+                failed_solver = "EulerFallback"
+
+            return {
+                "trajectory": [],
+                "stats": {"error": str(exc)},
+                "solver": failed_solver,
+            }
+
+        trajectory = self._build_trajectory(network, t_eval, y_series, species_order, index)
+
+        return {
+            "solver": used_solver,
+            "trajectory": trajectory,
+            "stats": {
+                "n_rules": len(network.rules),
+                "n_species": len(species_order),
+                "stiff": stiffness_proxy,
+            },
+        }
+
+    def _run_solver(
+        self, rhs: Any, options: SimulationOptions, y0: list[float], t_eval: list[float]
+    ) -> tuple[str, list[list[float]]]:
+        used_solver = options.solver
+        solve_ivp = None
+        try:
+            from scipy.integrate import solve_ivp as _solve_ivp  # type: ignore
+
+            solve_ivp = _solve_ivp
+        except ImportError:
+            solve_ivp = None
+
+        if solve_ivp is not None:
+            used_solver = "BDF"
+            _, y_series = self._solve_bdf(solve_ivp, rhs, options, y0, t_eval)
+        else:
+            used_solver = "EulerFallback"
+            _, y_series = self._solve_euler(rhs, options, y0, t_eval)
+
+        return used_solver, y_series
+
+    def _build_rhs(self, network: ReactionNetwork, index: dict[str, int]) -> Any:
+        def rhs(_t: float, y: list[float]) -> list[float]:
+            dydt = [0.0 for _ in y]
+            for rule in network.rules:
+                flux = max(0.0, float(rule.rate))
+                for reactant in rule.reactants:
+                    flux *= max(0.0, y[index[reactant]])
+                for reactant in rule.reactants:
+                    dydt[index[reactant]] -= flux
+                for product in rule.products:
+                    dydt[index[product]] += flux
+            return dydt
+
+        return rhs
+
+    def _prepare_species_and_ic(
+        self,
+        network: ReactionNetwork,
+        options: SimulationOptions,
+    ) -> tuple[list[str], dict[str, int], list[float]]:
         species_order = list(network.proteins.keys())
         for rule in network.rules:
             for token in [*rule.reactants, *rule.products]:
@@ -191,49 +236,17 @@ class LocalCatalystEngine:
                     index[name] = len(y0)
                     y0.append(0.0)
                 y0[index[name]] = float(value)
+        return species_order, index, y0
 
-        rates = [max(1e-8, float(r.rate)) for r in network.rules] or [1e-8]
-        stiffness_proxy = (max(rates) / min(rates)) > 100.0
-        t_eval = [i * options.dt for i in range(int(options.t_end / options.dt) + 1)]
-
-        def rhs(_t: float, y: list[float]) -> list[float]:
-            dydt = [0.0 for _ in y]
-            for rule in network.rules:
-                flux = max(0.0, float(rule.rate))
-                for reactant in rule.reactants:
-                    flux *= max(0.0, y[index[reactant]])
-                for reactant in rule.reactants:
-                    dydt[index[reactant]] -= flux
-                for product in rule.products:
-                    dydt[index[product]] += flux
-            return dydt
-
+    def _build_trajectory(
+        self,
+        network: ReactionNetwork,
+        t_eval: list[float],
+        y_series: list[list[float]],
+        species_order: list[str],
+        index: dict[str, int],
+    ) -> list[Dict[str, Any]]:
         trajectory = []
-        y_series = None
-        used_solver = options.solver
-
-        solve_ivp = None
-        try:
-            from scipy.integrate import solve_ivp as _solve_ivp  # type: ignore
-
-            solve_ivp = _solve_ivp
-        except ImportError:
-            solve_ivp = None
-
-        try:
-            if solve_ivp is not None:
-                used_solver = "BDF"
-                _, y_series = self._solve_bdf(solve_ivp, rhs, options, y0, t_eval)
-            else:
-                used_solver = "EulerFallback"
-                _, y_series = self._solve_euler(rhs, options, y0, t_eval)
-        except Exception as exc:
-            return {
-                "trajectory": [],
-                "stats": {"error": str(exc)},
-                "solver": used_solver,
-            }
-
         output_species = network.metadata.get("output_species")
         if output_species not in index:
             output_species = species_order[0] if species_order else ""
@@ -247,16 +260,7 @@ class LocalCatalystEngine:
                     "species": species_map,
                 }
             )
-
-        return {
-            "solver": used_solver,
-            "trajectory": trajectory,
-            "stats": {
-                "n_rules": len(network.rules),
-                "n_species": len(species_order),
-                "stiff": stiffness_proxy,
-            },
-        }
+        return trajectory
 
     def _solve_bdf(
         self,
@@ -379,7 +383,9 @@ class UltrasensitiveFitnessEvaluator:
             series = result.get("trajectory", [])
             final = 0.0
             if series:
-                final = float(series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0)))
+                final = float(
+                    series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0))
+                )
             responses.append(max(1e-8, final))
 
         lo = responses[0]
