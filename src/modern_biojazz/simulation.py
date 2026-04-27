@@ -129,39 +129,29 @@ class LocalCatalystEngine:
         stiffness_proxy = (max(rates) / min(rates)) > 100.0
         t_eval = [i * options.dt for i in range(int(options.t_end / options.dt) + 1)]
 
-        def rhs(_t: float, y: list[float]) -> list[float]:
-            dydt = [0.0 for _ in y]
-            for rule in network.rules:
-                flux = max(0.0, float(rule.rate))
-                for reactant in rule.reactants:
-                    flux *= max(0.0, y[index[reactant]])
-                for reactant in rule.reactants:
-                    dydt[index[reactant]] -= flux
-                for product in rule.products:
-                    dydt[index[product]] += flux
-            return dydt
+        rhs = self._build_rhs(network, index)
 
         used_solver = options.solver
-        solve_ivp = None
         try:
-            from scipy.integrate import solve_ivp as _solve_ivp  # type: ignore
-
-            solve_ivp = _solve_ivp
-        except ImportError:
-            solve_ivp = None
-
-        try:
-            if solve_ivp is not None:
-                used_solver = "BDF"
-                _, y_series = self._solve_bdf(solve_ivp, rhs, options, y0, t_eval)
-            else:
-                used_solver = "EulerFallback"
-                _, y_series = self._solve_euler(rhs, options, y0, t_eval)
+            used_solver, y_series = self._run_solver(rhs, options, y0, t_eval)
         except Exception as exc:
+            # Note: when _run_solver fails, the solver used up to that point needs to be determined
+            # If scipy.integrate was present but failed, the expected solver was BDF
+            # If scipy.integrate was absent and Euler failed, the expected solver was EulerFallback
+            # The previous implementation achieved this by mutating `used_solver` before exceptions.
+            # Here we duplicate the check logic or we could catch a custom exception.
+            # Since the logic is simple, we will just replicate the solver selection check.
+            try:
+                from scipy.integrate import solve_ivp as _solve_ivp  # type: ignore
+
+                failed_solver = "BDF"
+            except ImportError:
+                failed_solver = "EulerFallback"
+
             return {
                 "trajectory": [],
                 "stats": {"error": str(exc)},
-                "solver": used_solver,
+                "solver": failed_solver,
             }
 
         trajectory = self._build_trajectory(network, t_eval, y_series, species_order, index)
@@ -175,6 +165,42 @@ class LocalCatalystEngine:
                 "stiff": stiffness_proxy,
             },
         }
+
+    def _run_solver(
+        self, rhs: Any, options: SimulationOptions, y0: list[float], t_eval: list[float]
+    ) -> tuple[str, list[list[float]]]:
+        used_solver = options.solver
+        solve_ivp = None
+        try:
+            from scipy.integrate import solve_ivp as _solve_ivp  # type: ignore
+
+            solve_ivp = _solve_ivp
+        except ImportError:
+            solve_ivp = None
+
+        if solve_ivp is not None:
+            used_solver = "BDF"
+            _, y_series = self._solve_bdf(solve_ivp, rhs, options, y0, t_eval)
+        else:
+            used_solver = "EulerFallback"
+            _, y_series = self._solve_euler(rhs, options, y0, t_eval)
+
+        return used_solver, y_series
+
+    def _build_rhs(self, network: ReactionNetwork, index: dict[str, int]) -> Any:
+        def rhs(_t: float, y: list[float]) -> list[float]:
+            dydt = [0.0 for _ in y]
+            for rule in network.rules:
+                flux = max(0.0, float(rule.rate))
+                for reactant in rule.reactants:
+                    flux *= max(0.0, y[index[reactant]])
+                for reactant in rule.reactants:
+                    dydt[index[reactant]] -= flux
+                for product in rule.products:
+                    dydt[index[product]] += flux
+            return dydt
+
+        return rhs
 
     def _prepare_species_and_ic(
         self,
