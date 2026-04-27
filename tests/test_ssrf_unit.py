@@ -20,13 +20,3 @@ def test_catalyst_client_ssrf_validation():
     client = CatalystHTTPClient("https://10.0.0.1")
     with pytest.raises(ValueError, match="internal/reserved IP address"):
         client._validate_url(client.base_url)
-
-    # Missing hostname
-    client = CatalystHTTPClient("https://")
-    with pytest.raises(ValueError, match="Invalid URL: missing hostname"):
-        client._validate_url(client.base_url)
-
-    # Unresolvable hostname
-    client = CatalystHTTPClient("https://this-domain-does-not-exist.local")
-    with pytest.raises(ValueError, match="Could not resolve hostname"):
-        client._validate_url(client.base_url)

@@ -129,12 +129,11 @@ class ReactionNetwork:
             proteins[pname] = Protein(name=payload_p["name"], sites=sites)
 
         rules: List[Rule] = []
-        required_keys = {"name", "rule_type", "reactants", "products", "rate"}
         for idx, r in enumerate(rules_raw):
-            missing = required_keys.difference(r)
+            missing = [k for k in ["name", "rule_type", "reactants", "products", "rate"] if k not in r]
             if missing:
                 raise ReactionNetworkValidationError(
-                    f"Rule at index {idx} is missing required keys: {', '.join(sorted(missing))}"
+                    f"Rule at index {idx} is missing required keys: {', '.join(missing)}"
                 )
             rules.append(
                 Rule(

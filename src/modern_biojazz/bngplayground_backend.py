@@ -42,8 +42,8 @@ class BNGLParsingError(Exception):
 @lru_cache(maxsize=16384)
 def _format_rule(name: str, reactants: tuple, products: tuple) -> str:
     """Format and cache the string representation of a reaction rule."""
-    reactant_str = "() + ".join(reactants) + "()" if reactants else ""
-    product_str = "() + ".join(products) + "()" if products else ""
+    reactant_str = " + ".join([r + "()" for r in reactants])
+    product_str = " + ".join([p + "()" for p in products])
     return f"  {name}: {reactant_str} -> {product_str} {name}_rate"
 
 
@@ -217,9 +217,7 @@ class BNGPlaygroundBackend:
         last_response: Dict[str, Any] = {}
         for line in reversed(lines):
             line = line.strip()
-            # Fast path: skip empty lines and obvious non-JSON lines
-            # and lines that don't even contain the "result" string
-            if not line or not line.startswith("{") or not line.endswith("}") or '"result"' not in line:
+            if not line:
                 continue
 
             try:
@@ -280,7 +278,7 @@ class BNGPlaygroundBackend:
     def _generate_rules(self, network: ReactionNetwork) -> List[str]:
         lines = ["begin reaction rules"]
         lines.extend(
-            f"  {rule.name}: {'() + '.join(rule.reactants) + '()' if rule.reactants else ''} -> {'() + '.join(rule.products) + '()' if rule.products else ''} {rule.name}_rate"
+            f"  {rule.name}: {' + '.join([f'{r}()' for r in rule.reactants])} -> {' + '.join([f'{p}()' for p in rule.products])} {rule.name}_rate"
             for rule in network.rules
         )
         lines.extend(["end reaction rules", ""])
