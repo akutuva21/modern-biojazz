@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import random
+from typing import Any
 
 from .evolution import LLMEvolutionEngine, EvolutionConfig, DeterministicProposer, RandomProposer
 from .grounding import GroundingEngine
@@ -14,7 +15,7 @@ from .site_graph import ReactionNetwork
 from .simulation import LocalCatalystEngine, FitnessEvaluator, CatalystHTTPClient
 
 
-def main() -> None:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Modern BioJazz pipeline runner")
     parser.add_argument("--seed", required=True, help="Path to seed network JSON")
     parser.add_argument("--grounding", help="Path to grounding payload JSON")
@@ -29,52 +30,61 @@ def main() -> None:
     parser.add_argument("--llm-base-url", help="Base URL for OpenAI-compatible API")
     parser.add_argument("--llm-model", default="gpt-4o-mini")
     parser.add_argument("--llm-api-key-env", default="OPENAI_API_KEY")
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    with open(args.seed, "r", encoding="utf-8") as f:
-        seed_payload = json.load(f)
-    seed_network = ReactionNetwork.from_dict(seed_payload)
 
-    grounding_payload = None
-    if args.grounding:
-        with open(args.grounding, "r", encoding="utf-8") as f:
-            grounding_payload = json.load(f)
-
+def get_simulation_backend(args: argparse.Namespace) -> Any:
     if args.sim_backend == "http":
         if not args.sim_base_url:
             raise ValueError("--sim-base-url is required when --sim-backend=http")
-        simulation_backend = CatalystHTTPClient(base_url=args.sim_base_url)
-    else:
-        simulation_backend = LocalCatalystEngine()
+        return CatalystHTTPClient(base_url=args.sim_base_url)
+    return LocalCatalystEngine()
 
+
+def get_llm_proposer(args: argparse.Namespace) -> Any:
     if args.llm_provider == "openai_compatible":
         if not args.llm_base_url:
             raise ValueError("--llm-base-url is required when --llm-provider=openai_compatible")
         api_key = os.environ.get(args.llm_api_key_env, "")
         if not api_key:
             raise ValueError(f"Environment variable {args.llm_api_key_env} must be set for llm provider")
-        proposer = SafeActionFilterProposer(
+        return SafeActionFilterProposer(
             OpenAICompatibleProposer(
                 base_url=args.llm_base_url,
                 api_key=api_key,
                 model=args.llm_model,
             )
         )
-    elif args.llm_provider == "random":
-        proposer = RandomProposer(random.Random(7))
-    else:
-        proposer = DeterministicProposer()
+    if args.llm_provider == "random":
+        return RandomProposer(random.Random(7))
+    return DeterministicProposer()
 
+
+def load_payload(filepath: str | None) -> dict[str, Any] | None:
+    if not filepath:
+        return None
+    with open(filepath, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_pipeline(args: argparse.Namespace) -> ModernBioJazzPipeline:
     engine = LLMEvolutionEngine(
-        simulation_backend=simulation_backend,
+        simulation_backend=get_simulation_backend(args),
         fitness_evaluator=FitnessEvaluator(target_output=1.0),
-        proposer=proposer,
+        proposer=get_llm_proposer(args),
         mutator=GraphMutator(random.Random(7)),
         rng=random.Random(7),
     )
-    pipeline = ModernBioJazzPipeline(engine, GroundingEngine())
+    return ModernBioJazzPipeline(engine, GroundingEngine())
 
-    result = pipeline.run(
+
+def execute_run(
+    pipeline: ModernBioJazzPipeline,
+    seed_network: ReactionNetwork,
+    grounding_payload: dict[str, Any] | None,
+    args: argparse.Namespace,
+) -> Any:
+    return pipeline.run(
         seed_network,
         PipelineConfig(
             evolution=EvolutionConfig(
@@ -89,19 +99,38 @@ def main() -> None:
         grounding_payload=grounding_payload,
     )
 
-    output = {
+
+def format_output(result: Any) -> dict[str, Any]:
+    return {
         "best_score": result.evolution.best_score,
         "history": result.evolution.history,
         "best_network": result.evolution.best_network.to_dict(),
-        "grounding": None
-        if result.grounding is None
-        else {
-            "mapping": result.grounding.mapping,
-            "score": result.grounding.score,
-            "candidates_considered": result.grounding.candidates_considered,
-        },
+        "grounding": (
+            None
+            if result.grounding is None
+            else {
+                "mapping": result.grounding.mapping,
+                "score": result.grounding.score,
+                "candidates_considered": result.grounding.candidates_considered,
+            }
+        ),
     }
-    print(json.dumps(output, indent=2))
+
+
+def main() -> None:
+    args = parse_args()
+
+    seed_payload = load_payload(args.seed)
+    if seed_payload is None:
+        raise ValueError("Seed payload is required")
+    seed_network = ReactionNetwork.from_dict(seed_payload)
+
+    grounding_payload = load_payload(args.grounding)
+
+    pipeline = build_pipeline(args)
+    result = execute_run(pipeline, seed_network, grounding_payload, args)
+
+    print(json.dumps(format_output(result), indent=2))
 
 
 if __name__ == "__main__":
