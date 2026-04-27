@@ -9,6 +9,20 @@ class ReactionNetworkValidationError(ValueError):
     """Raised when a serialized reaction network payload is malformed."""
 
 
+def _fast_metadata_copy(d: Any) -> Any:
+    """
+    Very fast structural sharing copy for metadata dictionaries.
+    Assumes standard JSON-like objects (dicts, lists, primitives).
+    Significantly faster than standard library copy.deepcopy() in hot loops.
+    """
+    t = type(d)
+    if t is dict:
+        return {k: _fast_metadata_copy(v) for k, v in d.items()}
+    if t is list:
+        return [_fast_metadata_copy(v) for v in d]
+    return d
+
+
 @dataclass
 class Site:
     name: str
@@ -46,7 +60,7 @@ class ReactionNetwork:
         # Utilize structural sharing since operators replace objects rather than mutating them.
         proteins = self.proteins.copy()
         rules = self.rules.copy()
-        return ReactionNetwork(proteins=proteins, rules=rules, metadata=deepcopy(self.metadata))
+        return ReactionNetwork(proteins=proteins, rules=rules, metadata=_fast_metadata_copy(self.metadata))
 
     def validate(self) -> None:
         for protein_name, protein in self.proteins.items():
@@ -115,9 +129,7 @@ class ReactionNetwork:
             sites: List[Site] = []
             for s in payload_p.get("sites", []):
                 if "name" not in s or "site_type" not in s:
-                    raise ReactionNetworkValidationError(
-                        f"Protein '{pname}' has a site missing 'name' or 'site_type'."
-                    )
+                    raise ReactionNetworkValidationError(f"Protein '{pname}' has a site missing 'name' or 'site_type'.")
                 sites.append(
                     Site(
                         name=s["name"],
