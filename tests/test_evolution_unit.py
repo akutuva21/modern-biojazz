@@ -11,7 +11,7 @@ from modern_biojazz.evolution import (
     RandomProposer,
     DeterministicProposer,
 )
-from modern_biojazz.site_graph import ReactionNetwork
+from modern_biojazz.site_graph import ReactionNetwork, Protein
 from modern_biojazz.simulation import SimulationBackend, FitnessScorer
 
 
@@ -50,13 +50,17 @@ def test_llm_evolution_engine_evaluate(seed_network: ReactionNetwork):
 
     # Test exception handling
     fitness.score.side_effect = Exception("sim error")
-    score_err = engine._evaluate(seed_network, config)
+    err_network = ReactionNetwork()
+    err_network.proteins["err"] = Protein(name="err")
+    score_err = engine._evaluate(err_network, config)
     assert score_err == 0.0
 
     # Test low fitness
     fitness.score.side_effect = None
     fitness.score.return_value = -1.0
-    score_low = engine._evaluate(seed_network, config)
+    low_network = ReactionNetwork()
+    low_network.proteins["low"] = Protein(name="low")
+    score_low = engine._evaluate(low_network, config)
     assert score_low == -1.0
 
 
