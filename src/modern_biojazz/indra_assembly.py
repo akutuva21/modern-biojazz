@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class AssemblyState:
+    mol_types: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
+    params: Dict[str, float] = field(default_factory=dict)
+    rules: List[str] = field(default_factory=list)
+    param_counter: int = 0
+
+
+@dataclass
 class AssemblyResult:
     species: List[str]
     statements: List[Dict[str, Any]]
@@ -136,13 +144,10 @@ class INDRAAssembler:
         Produces a valid BNGL file from raw INDRA JSON statements by extracting
         agent names, modification types, and generating mass-action rules.
         """
-        mol_types: Dict[str, Dict[str, List[str]]] = {}  # protein -> {site -> [states]}
-        rules: List[str] = []
-        params: Dict[str, float] = {}
-        param_counter = 0
+        state = AssemblyState()
 
         for s in species:
-            mol_types.setdefault(s, {})
+            state.mol_types.setdefault(s, {})
 
         for stmt in raw_statements:
             stype = stmt.get("type", "").lower()
@@ -164,30 +169,30 @@ class INDRAAssembler:
                     continue
                 if name:
                     agent_names.append(name)
-                    mol_types.setdefault(name, {})
+                    state.mol_types.setdefault(name, {})
 
             if len(agent_names) < 2:
                 continue
 
-            param_counter += 1
+            state.param_counter += 1
             kinase, substrate = agent_names[0], agent_names[1]
 
             if "phosphorylation" in stype:
-                _handle_phosphorylation(stmt, param_counter, kinase, substrate, mol_types, params, rules)
+                _handle_phosphorylation(stmt, kinase, substrate, state)
 
             elif "dephosphorylation" in stype:
-                _handle_dephosphorylation(stmt, param_counter, kinase, substrate, mol_types, params, rules)
+                _handle_dephosphorylation(stmt, kinase, substrate, state)
 
             elif "complex" in stype or "bind" in stype:
-                _handle_complex(stmt, param_counter, kinase, substrate, mol_types, params, rules)
+                _handle_complex(stmt, kinase, substrate, state)
 
             elif "inhibition" in stype or "decreaseamount" in stype:
-                _handle_inhibition(stmt, param_counter, kinase, substrate, mol_types, params, rules)
+                _handle_inhibition(stmt, kinase, substrate, state)
 
             elif "activation" in stype or "increaseamount" in stype:
-                _handle_activation(stmt, param_counter, kinase, substrate, mol_types, params, rules)
+                _handle_activation(stmt, kinase, substrate, state)
 
-        return _render_bngl(mol_types, params, rules, species)
+        return _render_bngl(state.mol_types, state.params, state.rules, species)
 
 
 def load_assembly_snapshot(path: str | Path) -> AssemblyResult:
@@ -331,19 +336,16 @@ class INDRAGraphProposer:
 
 def _handle_phosphorylation(
     stmt: Dict[str, Any],
-    param_counter: int,
     kinase: str,
     substrate: str,
-    mol_types: Dict[str, Dict[str, List[str]]],
-    params: Dict[str, float],
-    rules: List[str]
+    state: AssemblyState
 ) -> None:
     site = _extract_site(stmt) or "phospho"
-    mol_types.setdefault(substrate, {})[site] = ["u", "p"]
-    pname = f"kp_{param_counter}"
-    params[pname] = _extract_belief(stmt) * 0.1
-    rules.append(
-        f"  r{param_counter}: "
+    state.mol_types.setdefault(substrate, {})[site] = ["u", "p"]
+    pname = f"kp_{state.param_counter}"
+    state.params[pname] = _extract_belief(stmt) * 0.1
+    state.rules.append(
+        f"  r{state.param_counter}: "
         f"{kinase}() + {substrate}({site}~u) -> "
         f"{kinase}() + {substrate}({site}~p) {pname}"
     )
@@ -351,19 +353,16 @@ def _handle_phosphorylation(
 
 def _handle_dephosphorylation(
     stmt: Dict[str, Any],
-    param_counter: int,
     kinase: str,
     substrate: str,
-    mol_types: Dict[str, Dict[str, List[str]]],
-    params: Dict[str, float],
-    rules: List[str]
+    state: AssemblyState
 ) -> None:
     site = _extract_site(stmt) or "phospho"
-    mol_types.setdefault(substrate, {})[site] = ["u", "p"]
-    pname = f"kdp_{param_counter}"
-    params[pname] = _extract_belief(stmt) * 0.05
-    rules.append(
-        f"  r{param_counter}: "
+    state.mol_types.setdefault(substrate, {})[site] = ["u", "p"]
+    pname = f"kdp_{state.param_counter}"
+    state.params[pname] = _extract_belief(stmt) * 0.05
+    state.rules.append(
+        f"  r{state.param_counter}: "
         f"{kinase}() + {substrate}({site}~p) -> "
         f"{kinase}() + {substrate}({site}~u) {pname}"
     )
@@ -371,21 +370,18 @@ def _handle_dephosphorylation(
 
 def _handle_complex(
     stmt: Dict[str, Any],
-    param_counter: int,
     kinase: str,
     substrate: str,
-    mol_types: Dict[str, Dict[str, List[str]]],
-    params: Dict[str, float],
-    rules: List[str]
+    state: AssemblyState
 ) -> None:
-    mol_types.setdefault(kinase, {}).setdefault(f"b_{substrate}", [])
-    mol_types.setdefault(substrate, {}).setdefault(f"b_{kinase}", [])
-    pname_f = f"kf_{param_counter}"
-    pname_r = f"kr_{param_counter}"
-    params[pname_f] = _extract_belief(stmt) * 0.01
-    params[pname_r] = 0.1
-    rules.append(
-        f"  r{param_counter}: "
+    state.mol_types.setdefault(kinase, {}).setdefault(f"b_{substrate}", [])
+    state.mol_types.setdefault(substrate, {}).setdefault(f"b_{kinase}", [])
+    pname_f = f"kf_{state.param_counter}"
+    pname_r = f"kr_{state.param_counter}"
+    state.params[pname_f] = _extract_belief(stmt) * 0.01
+    state.params[pname_r] = 0.1
+    state.rules.append(
+        f"  r{state.param_counter}: "
         f"{kinase}(b_{substrate}) + {substrate}(b_{kinase}) <-> "
         f"{kinase}(b_{substrate}!1).{substrate}(b_{kinase}!1) {pname_f}, {pname_r}"
     )
@@ -393,18 +389,15 @@ def _handle_complex(
 
 def _handle_inhibition(
     stmt: Dict[str, Any],
-    param_counter: int,
     kinase: str,
     substrate: str,
-    mol_types: Dict[str, Dict[str, List[str]]],
-    params: Dict[str, float],
-    rules: List[str]
+    state: AssemblyState
 ) -> None:
-    mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
-    pname = f"ki_{param_counter}"
-    params[pname] = _extract_belief(stmt) * 0.05
-    rules.append(
-        f"  r{param_counter}: "
+    state.mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
+    pname = f"ki_{state.param_counter}"
+    state.params[pname] = _extract_belief(stmt) * 0.05
+    state.rules.append(
+        f"  r{state.param_counter}: "
         f"{kinase}() + {substrate}(activity~active) -> "
         f"{kinase}() + {substrate}(activity~inactive) {pname}"
     )
@@ -412,18 +405,15 @@ def _handle_inhibition(
 
 def _handle_activation(
     stmt: Dict[str, Any],
-    param_counter: int,
     kinase: str,
     substrate: str,
-    mol_types: Dict[str, Dict[str, List[str]]],
-    params: Dict[str, float],
-    rules: List[str]
+    state: AssemblyState
 ) -> None:
-    mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
-    pname = f"ka_{param_counter}"
-    params[pname] = _extract_belief(stmt) * 0.1
-    rules.append(
-        f"  r{param_counter}: "
+    state.mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
+    pname = f"ka_{state.param_counter}"
+    state.params[pname] = _extract_belief(stmt) * 0.1
+    state.rules.append(
+        f"  r{state.param_counter}: "
         f"{kinase}() + {substrate}(activity~inactive) -> "
         f"{kinase}() + {substrate}(activity~active) {pname}"
     )
