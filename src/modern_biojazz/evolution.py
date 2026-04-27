@@ -62,6 +62,7 @@ class LLMEvolutionEngine:
         self.rng = rng or random.Random()
         self.candidate_filter = candidate_filter
         self.filter_rejection_count = 0
+        self._eval_cache: dict[str, float] = {}
 
     def _cegis_feedback(self, network: ReactionNetwork, score: float, failure_type: str, details: dict) -> None:
         if not hasattr(self.proposer, "record_feedback"):
@@ -167,6 +168,12 @@ class LLMEvolutionEngine:
         return f"{proteins}||{rules}"
 
     def _evaluate(self, network: ReactionNetwork, config: EvolutionConfig) -> float:
+        fp = self._network_fingerprint(network)
+        try:
+            return self._eval_cache[fp]
+        except KeyError:
+            pass
+
         try:
             score = self.fitness.score(
                 backend=self.backend,
@@ -192,6 +199,7 @@ class LLMEvolutionEngine:
                 details={"desc": "score<=0.0, no improvement"},
             )
 
+        self._eval_cache[fp] = score
         return score
 
     def _calc_unique_population(self, islands: List[List[ReactionNetwork]]) -> int:
