@@ -14,6 +14,7 @@ Usage:
     )
     optimized_network = result.best_network
 """
+
 from __future__ import annotations
 
 import math
@@ -27,20 +28,22 @@ from .site_graph import ReactionNetwork, Rule
 @dataclass
 class DEConfig:
     """Differential Evolution configuration."""
+
     pop_size: Optional[int] = None  # Default: 10 * n_params
-    F: float = 0.8              # Differential weight [0, 2]
-    CR: float = 0.9             # Crossover probability [0, 1]
-    max_eval: int = 2000        # Maximum objective evaluations
-    ftol: float = 1e-6          # Convergence tolerance on best value change
-    patience: int = 20          # Stagnant generations before stopping
-    log10_lower: float = -6.0   # log10 lower bound for rates
-    log10_upper: float = 2.0    # log10 upper bound for rates
+    F: float = 0.8  # Differential weight [0, 2]
+    CR: float = 0.9  # Crossover probability [0, 1]
+    max_eval: int = 2000  # Maximum objective evaluations
+    ftol: float = 1e-6  # Convergence tolerance on best value change
+    patience: int = 20  # Stagnant generations before stopping
+    log10_lower: float = -6.0  # log10 lower bound for rates
+    log10_upper: float = 2.0  # log10 upper bound for rates
     seed: int = 42
 
 
 @dataclass
 class DEState:
     """Internal state for Differential Evolution."""
+
     best_x: List[float]
     best_score: float
     n_eval: int
@@ -53,6 +56,7 @@ class DEState:
 @dataclass
 class DEResult:
     """Differential evolution result."""
+
     best_network: ReactionNetwork
     best_rates: List[float]
     best_score: float
@@ -101,13 +105,12 @@ def optimize_rates(
     lb = cfg.log10_lower
     ub = cfg.log10_upper
 
-    population = _initialize_population(
-        network, rate_indices, pop_size, n_dim, lb, ub, rng
-    )
+    population = _initialize_population(network, rate_indices, pop_size, n_dim, lb, ub, rng)
 
     evaluate = _make_evaluator(network, rate_indices, lb, ub, objective)
 
-    state = _run_de_loop(population, n_dim, pop_size, lb, ub, cfg, rng, evaluate)
+    optimizer = _DEOptimizer(population, n_dim, pop_size, lb, ub, cfg, rng, evaluate)
+    state = optimizer.run()
 
     return _build_result(network, rate_indices, state, lb, ub)
 
@@ -135,160 +138,138 @@ def _initialize_population(
     return population
 
 
-def _process_generation(
-    population: List[List[float]],
-    scores: List[float],
-    n_dim: int,
-    pop_size: int,
-    lb: float,
-    ub: float,
-    cfg: DEConfig,
-    rng: random.Random,
-    evaluate: Callable[[List[float]], float],
-    best_score: float,
-    best_x: List[float],
-    n_eval: int,
-) -> tuple[float, List[float], int]:
-    """Process a single generation of the DE loop."""
-    for i in range(pop_size):
-        if n_eval >= cfg.max_eval:
-            break
+class _DEOptimizer:
+    """Encapsulates the Differential Evolution optimization loop state."""
 
-        trial = _mutate_and_crossover(
-            i, population, n_dim, pop_size, lb, ub, cfg, rng
-        )
+    def __init__(
+        self,
+        population: List[List[float]],
+        n_dim: int,
+        pop_size: int,
+        lb: float,
+        ub: float,
+        cfg: DEConfig,
+        rng: random.Random,
+        evaluate: Callable[[List[float]], float],
+    ):
+        self.population = population
+        self.n_dim = n_dim
+        self.pop_size = pop_size
+        self.lb = lb
+        self.ub = ub
+        self.cfg = cfg
+        self.rng = rng
+        self.evaluate = evaluate
 
-        trial_score = evaluate(trial)
-        n_eval += 1
+    def run(self) -> DEState:
+        """Run the main Differential Evolution loop."""
+        scores = [self.evaluate(ind) for ind in self.population]
+        n_eval = self.pop_size
 
-        # Greedy selection (maximize).
-        if trial_score >= scores[i]:
-            population[i] = trial
-            scores[i] = trial_score
+        best_idx = max(range(self.pop_size), key=lambda i: scores[i])
+        best_score = scores[best_idx]
+        best_x = list(self.population[best_idx])
+        history = [best_score]
 
-            if trial_score > best_score:
-                best_score = trial_score
-                best_x = list(trial)
-
-    return best_score, best_x, n_eval
-
-
-def _update_stagnation(
-    best_score: float,
-    prev_best: float,
-    stagnant: int,
-    ftol: float,
-) -> tuple[int, float]:
-    """Update convergence stagnation counter."""
-    if abs(best_score - prev_best) < ftol:
-        stagnant += 1
-    else:
+        prev_best = best_score
         stagnant = 0
-    prev_best = best_score
-    return stagnant, prev_best
 
+        generation = 0
+        while n_eval < self.cfg.max_eval:
+            generation += 1
 
-def _run_de_loop(
-    population: List[List[float]],
-    n_dim: int,
-    pop_size: int,
-    lb: float,
-    ub: float,
-    cfg: DEConfig,
-    rng: random.Random,
-    evaluate: Callable[[List[float]], float],
-) -> DEState:
-    """Run the main Differential Evolution loop."""
-    scores = [evaluate(ind) for ind in population]
-    n_eval = pop_size
+            best_score, best_x, n_eval = self._process_generation(scores, best_score, best_x, n_eval)
 
-    best_idx = max(range(pop_size), key=lambda i: scores[i])
-    best_score = scores[best_idx]
-    best_x = list(population[best_idx])
-    history = [best_score]
+            history.append(best_score)
 
-    prev_best = best_score
-    stagnant = 0
+            # Convergence check.
+            stagnant, prev_best = self._update_stagnation(best_score, prev_best, stagnant)
 
-    generation = 0
-    while n_eval < cfg.max_eval:
-        generation += 1
+            if stagnant >= self.cfg.patience:
+                return DEState(
+                    best_x=best_x,
+                    best_score=best_score,
+                    n_eval=n_eval,
+                    generations=generation,
+                    converged=True,
+                    stop_reason="patience",
+                    history=history,
+                )
 
-        best_score, best_x, n_eval = _process_generation(
-            population,
-            scores,
-            n_dim,
-            pop_size,
-            lb,
-            ub,
-            cfg,
-            rng,
-            evaluate,
-            best_score,
-            best_x,
-            n_eval,
+        stop = "converged_f" if stagnant >= self.cfg.patience else "maxeval"
+        return DEState(
+            best_x=best_x,
+            best_score=best_score,
+            n_eval=n_eval,
+            generations=generation,
+            converged=(stop == "converged_f"),
+            stop_reason=stop,
+            history=history,
         )
 
-        history.append(best_score)
+    def _process_generation(
+        self,
+        scores: List[float],
+        best_score: float,
+        best_x: List[float],
+        n_eval: int,
+    ) -> tuple[float, List[float], int]:
+        """Process a single generation of the DE loop."""
+        for i in range(self.pop_size):
+            if n_eval >= self.cfg.max_eval:
+                break
 
-        # Convergence check.
-        stagnant, prev_best = _update_stagnation(
-            best_score, prev_best, stagnant, cfg.ftol
-        )
+            trial = self._mutate_and_crossover(i)
 
-        if stagnant >= cfg.patience:
-            return DEState(
-                best_x=best_x,
-                best_score=best_score,
-                n_eval=n_eval,
-                generations=generation,
-                converged=True,
-                stop_reason="patience",
-                history=history,
-            )
+            trial_score = self.evaluate(trial)
+            n_eval += 1
 
-    stop = "converged_f" if stagnant >= cfg.patience else "maxeval"
-    return DEState(
-        best_x=best_x,
-        best_score=best_score,
-        n_eval=n_eval,
-        generations=generation,
-        converged=(stop == "converged_f"),
-        stop_reason=stop,
-        history=history,
-    )
+            # Greedy selection (maximize).
+            if trial_score >= scores[i]:
+                self.population[i] = trial
+                scores[i] = trial_score
 
+                if trial_score > best_score:
+                    best_score = trial_score
+                    best_x = list(trial)
 
-def _mutate_and_crossover(
-    i: int,
-    population: List[List[float]],
-    n_dim: int,
-    pop_size: int,
-    lb: float,
-    ub: float,
-    cfg: DEConfig,
-    rng: random.Random,
-) -> List[float]:
-    """Generate a trial vector using DE/rand/1/bin."""
-    # DE/rand/1/bin: pick 3 distinct individuals ≠ i.
-    candidates = [j for j in range(pop_size) if j != i]
-    a, b, c = rng.sample(candidates, 3)
+        return best_score, best_x, n_eval
 
-    # Mutation.
-    mutant = [
-        population[a][d] + cfg.F * (population[b][d] - population[c][d])
-        for d in range(n_dim)
-    ]
-    # Clamp to bounds.
-    mutant = [max(lb, min(ub, m)) for m in mutant]
+    def _update_stagnation(
+        self,
+        best_score: float,
+        prev_best: float,
+        stagnant: int,
+    ) -> tuple[int, float]:
+        """Update convergence stagnation counter."""
+        if abs(best_score - prev_best) < self.cfg.ftol:
+            stagnant += 1
+        else:
+            stagnant = 0
+        prev_best = best_score
+        return stagnant, prev_best
 
-    # Binomial crossover.
-    j_rand = rng.randint(0, n_dim - 1)
-    trial = [
-        mutant[d] if (rng.random() < cfg.CR or d == j_rand) else population[i][d]
-        for d in range(n_dim)
-    ]
-    return trial
+    def _mutate_and_crossover(self, i: int) -> List[float]:
+        """Generate a trial vector using DE/rand/1/bin."""
+        # DE/rand/1/bin: pick 3 distinct individuals ≠ i.
+        candidates = [j for j in range(self.pop_size) if j != i]
+        a, b, c = self.rng.sample(candidates, 3)
+
+        # Mutation.
+        mutant = [
+            self.population[a][d] + self.cfg.F * (self.population[b][d] - self.population[c][d])
+            for d in range(self.n_dim)
+        ]
+        # Clamp to bounds.
+        mutant = [max(self.lb, min(self.ub, m)) for m in mutant]
+
+        # Binomial crossover.
+        j_rand = self.rng.randint(0, self.n_dim - 1)
+        trial = [
+            mutant[d] if (self.rng.random() < self.cfg.CR or d == j_rand) else self.population[i][d]
+            for d in range(self.n_dim)
+        ]
+        return trial
 
 
 def _make_evaluator(
@@ -299,6 +280,7 @@ def _make_evaluator(
     objective: Callable[[ReactionNetwork], float],
 ) -> Callable[[List[float]], float]:
     """Create the evaluation function for DE."""
+
     def evaluate(log_rates: List[float]) -> float:
         candidate = network.copy()
         for i, idx in enumerate(rate_indices):
@@ -308,12 +290,13 @@ def _make_evaluator(
                 rule_type=r.rule_type,
                 reactants=r.reactants,
                 products=r.products,
-                rate=10.0 ** max(lb, min(ub, log_rates[i]))
+                rate=10.0 ** max(lb, min(ub, log_rates[i])),
             )
         try:
             return objective(candidate)
         except Exception:
             return 0.0
+
     return evaluate
 
 
@@ -330,11 +313,7 @@ def _build_result(
         rate = 10.0 ** max(lb, min(ub, state.best_x[i]))
         r = best_network.rules[idx]
         best_network.rules[idx] = Rule(
-            name=r.name,
-            rule_type=r.rule_type,
-            reactants=r.reactants,
-            products=r.products,
-            rate=rate
+            name=r.name, rule_type=r.rule_type, reactants=r.reactants, products=r.products, rate=rate
         )
         best_rates.append(rate)
 
