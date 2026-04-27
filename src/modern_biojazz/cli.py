@@ -60,46 +60,31 @@ def get_llm_proposer(args: argparse.Namespace) -> Any:
     return DeterministicProposer()
 
 
-def format_output(result: Any) -> dict[str, Any]:
-    return {
-        "best_score": result.evolution.best_score,
-        "history": result.evolution.history,
-        "best_network": result.evolution.best_network.to_dict(),
-        "grounding": None
-        if result.grounding is None
-        else {
-            "mapping": result.grounding.mapping,
-            "score": result.grounding.score,
-            "candidates_considered": result.grounding.candidates_considered,
-        },
-    }
+def load_payload(filepath: str | None) -> dict[str, Any] | None:
+    if not filepath:
+        return None
+    with open(filepath, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def main() -> None:
-    args = parse_args()
-
-    with open(args.seed, "r", encoding="utf-8") as f:
-        seed_payload = json.load(f)
-    seed_network = ReactionNetwork.from_dict(seed_payload)
-
-    grounding_payload = None
-    if args.grounding:
-        with open(args.grounding, "r", encoding="utf-8") as f:
-            grounding_payload = json.load(f)
-
-    simulation_backend = get_simulation_backend(args)
-    proposer = get_llm_proposer(args)
-
+def build_pipeline(args: argparse.Namespace) -> ModernBioJazzPipeline:
     engine = LLMEvolutionEngine(
-        simulation_backend=simulation_backend,
+        simulation_backend=get_simulation_backend(args),
         fitness_evaluator=FitnessEvaluator(target_output=1.0),
-        proposer=proposer,
+        proposer=get_llm_proposer(args),
         mutator=GraphMutator(random.Random(7)),
         rng=random.Random(7),
     )
-    pipeline = ModernBioJazzPipeline(engine, GroundingEngine())
+    return ModernBioJazzPipeline(engine, GroundingEngine())
 
-    result = pipeline.run(
+
+def execute_run(
+    pipeline: ModernBioJazzPipeline,
+    seed_network: ReactionNetwork,
+    grounding_payload: dict[str, Any] | None,
+    args: argparse.Namespace,
+) -> Any:
+    return pipeline.run(
         seed_network,
         PipelineConfig(
             evolution=EvolutionConfig(
@@ -113,6 +98,37 @@ def main() -> None:
         ),
         grounding_payload=grounding_payload,
     )
+
+
+def format_output(result: Any) -> dict[str, Any]:
+    return {
+        "best_score": result.evolution.best_score,
+        "history": result.evolution.history,
+        "best_network": result.evolution.best_network.to_dict(),
+        "grounding": (
+            None
+            if result.grounding is None
+            else {
+                "mapping": result.grounding.mapping,
+                "score": result.grounding.score,
+                "candidates_considered": result.grounding.candidates_considered,
+            }
+        ),
+    }
+
+
+def main() -> None:
+    args = parse_args()
+
+    seed_payload = load_payload(args.seed)
+    if seed_payload is None:
+        raise ValueError("Seed payload is required")
+    seed_network = ReactionNetwork.from_dict(seed_payload)
+
+    grounding_payload = load_payload(args.grounding)
+
+    pipeline = build_pipeline(args)
+    result = execute_run(pipeline, seed_network, grounding_payload, args)
 
     print(json.dumps(format_output(result), indent=2))
 
