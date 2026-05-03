@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import random
-from typing import Any
 
 from .evolution import LLMEvolutionEngine, EvolutionConfig, DeterministicProposer, RandomProposer
 from .grounding import GroundingEngine
@@ -15,7 +14,7 @@ from .site_graph import ReactionNetwork
 from .simulation import LocalCatalystEngine, FitnessEvaluator, CatalystHTTPClient
 
 
-def parse_args() -> argparse.Namespace:
+def main() -> None:
     parser = argparse.ArgumentParser(description="Modern BioJazz pipeline runner")
     parser.add_argument("--seed", required=True, help="Path to seed network JSON")
     parser.add_argument("--grounding", help="Path to grounding payload JSON")
@@ -30,53 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-base-url", help="Base URL for OpenAI-compatible API")
     parser.add_argument("--llm-model", default="gpt-4o-mini")
     parser.add_argument("--llm-api-key-env", default="OPENAI_API_KEY")
-    return parser.parse_args()
-
-
-def get_simulation_backend(args: argparse.Namespace) -> Any:
-    if args.sim_backend == "http":
-        if not args.sim_base_url:
-            raise ValueError("--sim-base-url is required when --sim-backend=http")
-        return CatalystHTTPClient(base_url=args.sim_base_url)
-    return LocalCatalystEngine()
-
-
-def get_llm_proposer(args: argparse.Namespace) -> Any:
-    if args.llm_provider == "openai_compatible":
-        if not args.llm_base_url:
-            raise ValueError("--llm-base-url is required when --llm-provider=openai_compatible")
-        api_key = os.environ.get(args.llm_api_key_env, "")
-        if not api_key:
-            raise ValueError(f"Environment variable {args.llm_api_key_env} must be set for llm provider")
-        return SafeActionFilterProposer(
-            OpenAICompatibleProposer(
-                base_url=args.llm_base_url,
-                api_key=api_key,
-                model=args.llm_model,
-            )
-        )
-    if args.llm_provider == "random":
-        return RandomProposer(random.Random(7))
-    return DeterministicProposer()
-
-
-def format_output(result: Any) -> dict[str, Any]:
-    return {
-        "best_score": result.evolution.best_score,
-        "history": result.evolution.history,
-        "best_network": result.evolution.best_network.to_dict(),
-        "grounding": None
-        if result.grounding is None
-        else {
-            "mapping": result.grounding.mapping,
-            "score": result.grounding.score,
-            "candidates_considered": result.grounding.candidates_considered,
-        },
-    }
-
-
-def main() -> None:
-    args = parse_args()
+    args = parser.parse_args()
 
     with open(args.seed, "r", encoding="utf-8") as f:
         seed_payload = json.load(f)
@@ -87,8 +40,30 @@ def main() -> None:
         with open(args.grounding, "r", encoding="utf-8") as f:
             grounding_payload = json.load(f)
 
-    simulation_backend = get_simulation_backend(args)
-    proposer = get_llm_proposer(args)
+    if args.sim_backend == "http":
+        if not args.sim_base_url:
+            raise ValueError("--sim-base-url is required when --sim-backend=http")
+        simulation_backend = CatalystHTTPClient(base_url=args.sim_base_url)
+    else:
+        simulation_backend = LocalCatalystEngine()
+
+    if args.llm_provider == "openai_compatible":
+        if not args.llm_base_url:
+            raise ValueError("--llm-base-url is required when --llm-provider=openai_compatible")
+        api_key = os.environ.get(args.llm_api_key_env, "")
+        if not api_key:
+            raise ValueError(f"Environment variable {args.llm_api_key_env} must be set for llm provider")
+        proposer = SafeActionFilterProposer(
+            OpenAICompatibleProposer(
+                base_url=args.llm_base_url,
+                api_key=api_key,
+                model=args.llm_model,
+            )
+        )
+    elif args.llm_provider == "random":
+        proposer = RandomProposer(random.Random(7))
+    else:
+        proposer = DeterministicProposer()
 
     engine = LLMEvolutionEngine(
         simulation_backend=simulation_backend,
@@ -114,7 +89,19 @@ def main() -> None:
         grounding_payload=grounding_payload,
     )
 
-    print(json.dumps(format_output(result), indent=2))
+    output = {
+        "best_score": result.evolution.best_score,
+        "history": result.evolution.history,
+        "best_network": result.evolution.best_network.to_dict(),
+        "grounding": None
+        if result.grounding is None
+        else {
+            "mapping": result.grounding.mapping,
+            "score": result.grounding.score,
+            "candidates_considered": result.grounding.candidates_considered,
+        },
+    }
+    print(json.dumps(output, indent=2))
 
 
 if __name__ == "__main__":

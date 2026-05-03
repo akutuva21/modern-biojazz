@@ -5,8 +5,8 @@ import json
 import re
 import socket
 import time
-from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from typing import List, Protocol
 
@@ -29,31 +29,22 @@ class OpenAICompatibleProposer:
     feedback_log: List[str] | None = None
 
     def _validate_url(self, url: str) -> None:
-        parsed = urlparse(url)
+        parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":
             raise ValueError(f"Only HTTPS URLs are allowed, got: {parsed.scheme}")
         hostname = parsed.hostname
         if not hostname:
             raise ValueError("Invalid hostname in URL")
         try:
-            addr_info = socket.getaddrinfo(hostname, None)
+            ip = socket.gethostbyname(hostname)
         except socket.gaierror as e:
             raise ValueError(f"Could not resolve hostname {hostname}: {e}")
-
-        for _, _, _, _, sockaddr in addr_info:
-            ip = sockaddr[0]
-            try:
-                ip_obj = ipaddress.ip_address(ip)
-            except ValueError as e:
-                raise ValueError(f"Invalid IP address resolved {ip}: {e}")
-            if (
-                ip_obj.is_private
-                or ip_obj.is_loopback
-                or ip_obj.is_link_local
-                or ip_obj.is_multicast
-                or ip_obj.is_reserved
-            ):
-                raise ValueError(f"URL resolves to an internal or reserved IP address: {ip}")
+        try:
+            ip_obj = ipaddress.ip_address(ip)
+        except ValueError as e:
+            raise ValueError(f"Invalid IP address resolved {ip}: {e}")
+        if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_link_local or ip_obj.is_multicast:
+            raise ValueError(f"URL resolves to an internal or reserved IP address: {ip}")
 
     def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
         self._validate_url(self.base_url)
@@ -81,7 +72,7 @@ class OpenAICompatibleProposer:
         last_error: Exception | None = None
         for attempt in range(self.retry_count + 1):
             try:
-                req = Request(
+                req = urllib.request.Request(
                     url=f"{self.base_url.rstrip('/')}/chat/completions",
                     data=json.dumps(payload).encode("utf-8"),
                     headers={
@@ -90,7 +81,7 @@ class OpenAICompatibleProposer:
                     },
                     method="POST",
                 )
-                with urlopen(req, timeout=self.timeout_seconds) as response:
+                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
                     raw = json.loads(response.read().decode("utf-8"))
                 break
             except Exception as exc:
@@ -179,7 +170,7 @@ class LLMDenoisingProposer:
         last_error: Exception | None = None
         for attempt in range(self.inner.retry_count + 1):
             try:
-                req = Request(
+                req = urllib.request.Request(
                     url=f"{self.inner.base_url.rstrip('/')}/chat/completions",
                     data=json.dumps(payload).encode("utf-8"),
                     headers={
@@ -188,7 +179,7 @@ class LLMDenoisingProposer:
                     },
                     method="POST",
                 )
-                with urlopen(req, timeout=self.inner.timeout_seconds) as response:
+                with urllib.request.urlopen(req, timeout=self.inner.timeout_seconds) as response:
                     raw = json.loads(response.read().decode("utf-8"))
                 break
             except Exception as exc:
