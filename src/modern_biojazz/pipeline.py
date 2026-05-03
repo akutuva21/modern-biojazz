@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Any
 
 from .evolution import LLMEvolutionEngine, EvolutionConfig, EvolutionResult
 from .grounding import GroundingEngine, GroundingResult
@@ -28,7 +28,7 @@ class ModernBioJazzPipeline:
         self,
         seed_network: ReactionNetwork,
         config: PipelineConfig,
-        grounding_payload: Dict[str, Any] | None = None,
+        grounding_payload: dict[str, Any] | None = None,
     ) -> PipelineResult:
         if config.do_grounding and grounding_payload is not None:
             # Build the allowed set from both grounding abstract types AND the seed
@@ -63,7 +63,7 @@ class ModernBioJazzPipeline:
         # Regex to strip trailing _P or _inh iteratively
         suffix_pattern = re.compile(r"(_P|_inh)+$")
 
-        _base_cache: Dict[str, str] = {}
+        _base_cache: dict[str, str] = {}
 
         def _base_protein(token: str) -> str:
             """Strip derived suffixes to find the base protein name.
@@ -80,7 +80,7 @@ class ModernBioJazzPipeline:
             _base_cache[orig_token] = token
             return token
 
-        _allowed_cache: Dict[str, bool] = {}
+        _allowed_cache: dict[str, bool] = {}
 
         def _is_allowed_token(token: str) -> bool:
             if token in _allowed_cache:
