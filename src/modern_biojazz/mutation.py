@@ -122,14 +122,19 @@ class GraphMutator:
         self,
         network: ReactionNetwork,
         rule_type: str,
-        r1: str,
-        r2: str,
-        p2_suffix: str,
+        reactants: tuple[str, str],
         rate: float,
     ) -> None:
+        r1, r2 = reactants
         if r1 not in network.proteins or r2 not in network.proteins:
             return
-        prefix = "phos" if rule_type == "phosphorylation" else "inh"
+        if rule_type == "phosphorylation":
+            prefix = "phos"
+            p2_suffix = "_P"
+        else:
+            prefix = "inh"
+            p2_suffix = "_inh"
+
         rname = f"{prefix}_{r1}_{r2}_{len(network.rules)+1}"
         modified_r2 = f"{r2}{p2_suffix}"
         self._add_species_if_missing(network, modified_r2)
@@ -146,10 +151,10 @@ class GraphMutator:
     def add_phosphorylation_rule(
         self, network: ReactionNetwork, kinase: str, substrate: str, rate: float = 0.2
     ) -> None:
-        self._add_simple_rule(network, "phosphorylation", kinase, substrate, "_P", rate)
+        self._add_simple_rule(network, "phosphorylation", (kinase, substrate), rate)
 
     def add_inhibition_rule(self, network: ReactionNetwork, inhibitor: str, target: str, rate: float = 0.05) -> None:
-        self._add_simple_rule(network, "inhibition", inhibitor, target, "_inh", rate)
+        self._add_simple_rule(network, "inhibition", (inhibitor, target), rate)
 
     def remove_rule(self, network: ReactionNetwork, rule_name: str) -> None:
         network.rules = [r for r in network.rules if r.name != rule_name]
