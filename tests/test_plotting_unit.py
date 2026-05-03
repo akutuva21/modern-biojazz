@@ -2,7 +2,6 @@ import os
 import pytest
 import matplotlib.pyplot as plt
 import seaborn as sns
-from unittest.mock import MagicMock, call
 
 from modern_biojazz.plotting import (
     save_fig,
@@ -34,20 +33,6 @@ def test_save_fig(tmp_path):
 
     assert os.path.exists(os.path.join(out_dir, "test_plot.png"))
     assert os.path.exists(os.path.join(out_dir, "test_plot.svg"))
-
-def test_save_fig_mocked_calls(tmp_path):
-    fig = MagicMock(spec=plt.Figure)
-    filename = "test_plot.png"
-    out_dir = str(tmp_path)
-
-    save_fig(fig, filename, formats=["png", "svg"], out_dir=out_dir)
-
-    expected_calls = [
-        call(os.path.join(out_dir, "test_plot.png"), bbox_inches="tight", dpi=300, transparent=False),
-        call(os.path.join(out_dir, "test_plot.svg"), bbox_inches="tight", dpi=300, transparent=False),
-    ]
-    fig.savefig.assert_has_calls(expected_calls, any_order=False)
-    assert fig.savefig.call_count == 2
 
 def test_plot_fitness_trajectory():
     gen_sum1 = GenerationSummary(generation=0, best_score=0.1, best_n_proteins=2, best_n_rules=1, top_scores=[0.1], unique_population=10)

@@ -7,7 +7,7 @@ import socket
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Protocol
 
 from .site_graph import ReactionNetwork
@@ -26,7 +26,8 @@ class SimulationBackend(Protocol):
         self,
         network: ReactionNetwork,
         options: SimulationOptions,
-    ) -> Dict[str, Any]: ...
+    ) -> Dict[str, Any]:
+        ...
 
 
 class FitnessScorer(Protocol):
@@ -40,7 +41,8 @@ class FitnessScorer(Protocol):
         dt: float = 1.0,
         solver: str = "Rodas5P",
         initial_conditions: Dict[str, float] | None = None,
-    ) -> float: ...
+    ) -> float:
+        ...
 
 
 @dataclass
@@ -123,64 +125,6 @@ class LocalCatalystEngine:
         network: ReactionNetwork,
         options: SimulationOptions,
     ) -> Dict[str, Any]:
-        species_order, index, y0 = self._prepare_species_and_ic(network, options)
-
-        rates = [max(1e-8, float(r.rate)) for r in network.rules] or [1e-8]
-        stiffness_proxy = (max(rates) / min(rates)) > 100.0
-        t_eval = [i * options.dt for i in range(int(options.t_end / options.dt) + 1)]
-
-        def rhs(_t: float, y: list[float]) -> list[float]:
-            dydt = [0.0 for _ in y]
-            for rule in network.rules:
-                flux = max(0.0, float(rule.rate))
-                for reactant in rule.reactants:
-                    flux *= max(0.0, y[index[reactant]])
-                for reactant in rule.reactants:
-                    dydt[index[reactant]] -= flux
-                for product in rule.products:
-                    dydt[index[product]] += flux
-            return dydt
-
-        used_solver = options.solver
-        solve_ivp = None
-        try:
-            from scipy.integrate import solve_ivp as _solve_ivp  # type: ignore
-
-            solve_ivp = _solve_ivp
-        except ImportError:
-            solve_ivp = None
-
-        try:
-            if solve_ivp is not None:
-                used_solver = "BDF"
-                _, y_series = self._solve_bdf(solve_ivp, rhs, options, y0, t_eval)
-            else:
-                used_solver = "EulerFallback"
-                _, y_series = self._solve_euler(rhs, options, y0, t_eval)
-        except Exception as exc:
-            return {
-                "trajectory": [],
-                "stats": {"error": str(exc)},
-                "solver": used_solver,
-            }
-
-        trajectory = self._build_trajectory(network, t_eval, y_series, species_order, index)
-
-        return {
-            "solver": used_solver,
-            "trajectory": trajectory,
-            "stats": {
-                "n_rules": len(network.rules),
-                "n_species": len(species_order),
-                "stiff": stiffness_proxy,
-            },
-        }
-
-    def _prepare_species_and_ic(
-        self,
-        network: ReactionNetwork,
-        options: SimulationOptions,
-    ) -> tuple[list[str], dict[str, int], list[float]]:
         species_order = list(network.proteins.keys())
         for rule in network.rules:
             for token in [*rule.reactants, *rule.products]:
@@ -210,17 +154,49 @@ class LocalCatalystEngine:
                     index[name] = len(y0)
                     y0.append(0.0)
                 y0[index[name]] = float(value)
-        return species_order, index, y0
 
-    def _build_trajectory(
-        self,
-        network: ReactionNetwork,
-        t_eval: list[float],
-        y_series: list[list[float]],
-        species_order: list[str],
-        index: dict[str, int],
-    ) -> list[Dict[str, Any]]:
+        rates = [max(1e-8, float(r.rate)) for r in network.rules] or [1e-8]
+        stiffness_proxy = (max(rates) / min(rates)) > 100.0
+        t_eval = [i * options.dt for i in range(int(options.t_end / options.dt) + 1)]
+
+        def rhs(_t: float, y: list[float]) -> list[float]:
+            dydt = [0.0 for _ in y]
+            for rule in network.rules:
+                flux = max(0.0, float(rule.rate))
+                for reactant in rule.reactants:
+                    flux *= max(0.0, y[index[reactant]])
+                for reactant in rule.reactants:
+                    dydt[index[reactant]] -= flux
+                for product in rule.products:
+                    dydt[index[product]] += flux
+            return dydt
+
         trajectory = []
+        y_series = None
+        used_solver = options.solver
+
+        solve_ivp = None
+        try:
+            from scipy.integrate import solve_ivp as _solve_ivp  # type: ignore
+
+            solve_ivp = _solve_ivp
+        except ImportError:
+            solve_ivp = None
+
+        try:
+            if solve_ivp is not None:
+                used_solver = "BDF"
+                _, y_series = self._solve_bdf(solve_ivp, rhs, options, y0, t_eval)
+            else:
+                used_solver = "EulerFallback"
+                _, y_series = self._solve_euler(rhs, options, y0, t_eval)
+        except Exception as exc:
+            return {
+                "trajectory": [],
+                "stats": {"error": str(exc)},
+                "solver": used_solver,
+            }
+
         output_species = network.metadata.get("output_species")
         if output_species not in index:
             output_species = species_order[0] if species_order else ""
@@ -234,7 +210,16 @@ class LocalCatalystEngine:
                     "species": species_map,
                 }
             )
-        return trajectory
+
+        return {
+            "solver": used_solver,
+            "trajectory": trajectory,
+            "stats": {
+                "n_rules": len(network.rules),
+                "n_species": len(species_order),
+                "stiff": stiffness_proxy,
+            },
+        }
 
     def _solve_bdf(
         self,
@@ -357,9 +342,7 @@ class UltrasensitiveFitnessEvaluator:
             series = result.get("trajectory", [])
             final = 0.0
             if series:
-                final = float(
-                    series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0))
-                )
+                final = float(series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0)))
             responses.append(max(1e-8, final))
 
         lo = responses[0]

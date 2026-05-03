@@ -122,14 +122,19 @@ class GraphMutator:
         self,
         network: ReactionNetwork,
         rule_type: str,
-        r1: str,
-        r2: str,
-        p2_suffix: str,
+        reactants: tuple[str, str],
         rate: float,
     ) -> None:
+        r1, r2 = reactants
         if r1 not in network.proteins or r2 not in network.proteins:
             return
-        prefix = "phos" if rule_type == "phosphorylation" else "inh"
+        if rule_type == "phosphorylation":
+            prefix = "phos"
+            p2_suffix = "_P"
+        else:
+            prefix = "inh"
+            p2_suffix = "_inh"
+
         rname = f"{prefix}_{r1}_{r2}_{len(network.rules)+1}"
         modified_r2 = f"{r2}{p2_suffix}"
         self._add_species_if_missing(network, modified_r2)
@@ -146,10 +151,10 @@ class GraphMutator:
     def add_phosphorylation_rule(
         self, network: ReactionNetwork, kinase: str, substrate: str, rate: float = 0.2
     ) -> None:
-        self._add_simple_rule(network, "phosphorylation", kinase, substrate, "_P", rate)
+        self._add_simple_rule(network, "phosphorylation", (kinase, substrate), rate)
 
     def add_inhibition_rule(self, network: ReactionNetwork, inhibitor: str, target: str, rate: float = 0.05) -> None:
-        self._add_simple_rule(network, "inhibition", inhibitor, target, "_inh", rate)
+        self._add_simple_rule(network, "inhibition", (inhibitor, target), rate)
 
     def remove_rule(self, network: ReactionNetwork, rule_name: str) -> None:
         network.rules = [r for r in network.rules if r.name != rule_name]
@@ -313,7 +318,7 @@ class GraphMutator:
                         name=s.name,
                         site_type=s.site_type,
                         states=s.states.copy(),
-                        allowed_partners=s.allowed_partners.copy()
+                        allowed_partners=s.allowed_partners.copy(),
                     )
                     for s in p.sites
                 ]
@@ -341,126 +346,120 @@ class GraphMutator:
                         rule_type=rule.rule_type,
                         reactants=rule.reactants.copy(),
                         products=rule.products.copy(),
-                        rate=rule.rate
+                        rate=rule.rate,
                     )
                     child.rules.append(new_rule)
                     child_rule_names.add(rule.name)
 
         return child
 
+    def _action_random_add_site(self, net: ReactionNetwork) -> None:
+        if not net.proteins:
+            self.add_protein(net)
+        target = self.rng.choice(list(net.proteins))
+        site_type = self.rng.choice(["binding", "modification"])
+        self.add_site(net, target, f"s{self.rng.randint(1, 999)}", site_type)
+
+    def _action_random_bind(self, net: ReactionNetwork) -> None:
+        if len(net.proteins) < 2:
+            self.add_protein(net)
+            self.add_protein(net)
+        names = list(net.proteins)
+        a, b = self.rng.sample(names, 2)
+        self._ensure_binding_sites(net, a, b)
+        self.add_binding_rule(net, a, b)
+
+    def _action_random_phos(self, net: ReactionNetwork) -> None:
+        if len(net.proteins) < 2:
+            self.add_protein(net)
+            self.add_protein(net)
+        names = list(net.proteins)
+        k, s = self.rng.sample(names, 2)
+        self.add_phosphorylation_rule(net, k, s)
+
+    def _action_random_inhibit(self, net: ReactionNetwork) -> None:
+        if len(net.proteins) < 2:
+            self.add_protein(net)
+            self.add_protein(net)
+        names = list(net.proteins)
+        i, t = self.rng.sample(names, 2)
+        self.add_inhibition_rule(net, i, t)
+
+    def _action_random_remove_rule(self, net: ReactionNetwork) -> None:
+        if not net.rules:
+            return
+        target = self.rng.choice(net.rules)
+        self.remove_rule(net, target.name)
+
+    def _action_random_modify_rate(self, net: ReactionNetwork) -> None:
+        if not net.rules:
+            return
+        target = self.rng.choice(net.rules)
+        # Log-uniform jitter around 1.0 keeps multiplicative updates stable.
+        multiplier = 10 ** self.rng.uniform(-0.2, 0.2)
+        self.modify_rate(net, target.name, multiplier)
+
+    def _action_random_remove_site(self, net: ReactionNetwork) -> None:
+        weights = []
+        names = []
+        total_sites = 0
+        for name in net.proteins:
+            c = len(net.proteins[name].sites)
+            if c > 0:
+                names.append(name)
+                weights.append(c)
+                total_sites += c
+
+        if total_sites == 0:
+            return
+
+        pname = self.rng.choices(names, weights=weights, k=1)[0]
+        sname = self.rng.choice(net.proteins[pname].sites).name
+        self.remove_site(net, pname, sname)
+
+    def _action_random_duplicate(self, net: ReactionNetwork) -> None:
+        if not net.proteins:
+            self.add_protein(net)
+        target = self.rng.choice(list(net.proteins))
+        self.duplicate_protein_with_rewiring(net, target)
+
+    def _action_random_remove_protein(self, net: ReactionNetwork) -> None:
+        if len(net.proteins) <= 1:
+            return
+        target = self.rng.choice(list(net.proteins))
+        self.remove_protein(net, target)
+
+    def _action_random_dephos(self, net: ReactionNetwork) -> None:
+        phospho_species = [name for name in net.proteins if name.endswith("_P")]
+        if not phospho_species:
+            return
+        substrate_p = self.rng.choice(phospho_species)
+        candidates = [n for n in net.proteins if n != substrate_p and not n.endswith("_P")]
+        if not candidates:
+            return
+        phosphatase = self.rng.choice(candidates)
+        self.add_dephosphorylation_rule(net, phosphatase, substrate_p)
+
+    def _action_random_unbind(self, net: ReactionNetwork) -> None:
+        complexes = [name for name in net.proteins if ":" in name]
+        if not complexes:
+            return
+        target = self.rng.choice(complexes)
+        self.add_unbinding_rule(net, target)
+
     def action_library(self, network: ReactionNetwork) -> Dict[str, MutationAction]:
-        def random_add_site(net: ReactionNetwork) -> None:
-            if not net.proteins:
-                self.add_protein(net)
-            target = self.rng.choice(list(net.proteins))
-            site_type = self.rng.choice(["binding", "modification"])
-            self.add_site(net, target, f"s{self.rng.randint(1, 999)}", site_type)
-
-        def random_bind(net: ReactionNetwork) -> None:
-            if len(net.proteins) < 2:
-                self.add_protein(net)
-                self.add_protein(net)
-            names = list(net.proteins)
-            a, b = self.rng.sample(names, 2)
-            self._ensure_binding_sites(net, a, b)
-            self.add_binding_rule(net, a, b)
-
-        def random_phos(net: ReactionNetwork) -> None:
-            if len(net.proteins) < 2:
-                self.add_protein(net)
-                self.add_protein(net)
-            names = list(net.proteins)
-            k, s = self.rng.sample(names, 2)
-            self.add_phosphorylation_rule(net, k, s)
-
-        def random_inhibit(net: ReactionNetwork) -> None:
-            if len(net.proteins) < 2:
-                self.add_protein(net)
-                self.add_protein(net)
-            names = list(net.proteins)
-            i, t = self.rng.sample(names, 2)
-            self.add_inhibition_rule(net, i, t)
-
-        def random_remove_rule(net: ReactionNetwork) -> None:
-            if not net.rules:
-                return
-            target = self.rng.choice(net.rules)
-            self.remove_rule(net, target.name)
-
-        def random_modify_rate(net: ReactionNetwork) -> None:
-            if not net.rules:
-                return
-            target = self.rng.choice(net.rules)
-            # Log-uniform jitter around 1.0 keeps multiplicative updates stable.
-            multiplier = 10 ** self.rng.uniform(-0.2, 0.2)
-            self.modify_rate(net, target.name, multiplier)
-
-        def random_remove_site(net: ReactionNetwork) -> None:
-            weights = []
-            names = []
-            total_sites = 0
-            for name in net.proteins:
-                c = len(net.proteins[name].sites)
-                if c > 0:
-                    names.append(name)
-                    weights.append(c)
-                    total_sites += c
-
-            if total_sites == 0:
-                return
-
-            pname = self.rng.choices(names, weights=weights, k=1)[0]
-            sname = self.rng.choice(net.proteins[pname].sites).name
-            self.remove_site(net, pname, sname)
-
-        def random_duplicate(net: ReactionNetwork) -> None:
-            if not net.proteins:
-                self.add_protein(net)
-            target = self.rng.choice(list(net.proteins))
-            self.duplicate_protein_with_rewiring(net, target)
-
-        def random_remove_protein(net: ReactionNetwork) -> None:
-            if len(net.proteins) <= 1:
-                return
-            target = self.rng.choice(list(net.proteins))
-            self.remove_protein(net, target)
-
-        def random_dephos(net: ReactionNetwork) -> None:
-            phospho_species = [name for name in net.proteins if name.endswith("_P")]
-            if not phospho_species:
-                return
-            substrate_p = self.rng.choice(phospho_species)
-            candidates = [n for n in net.proteins if n != substrate_p and not n.endswith("_P")]
-            if not candidates:
-                return
-            phosphatase = self.rng.choice(candidates)
-            self.add_dephosphorylation_rule(net, phosphatase, substrate_p)
-
-        def random_unbind(net: ReactionNetwork) -> None:
-            complexes = [name for name in net.proteins if ":" in name]
-            if not complexes:
-                return
-            target = self.rng.choice(complexes)
-            self.add_unbinding_rule(net, target)
-
-        def motif_kinase_cascade(net: ReactionNetwork) -> None:
-            self.add_kinase_cascade(net)
-
-        def motif_feedback_loop(net: ReactionNetwork) -> None:
-            self.add_negative_feedback_loop(net)
-
         return {
-            "add_site": MutationAction("add_site", random_add_site),
-            "add_kinase_cascade": MutationAction("add_kinase_cascade", motif_kinase_cascade),
-            "add_feedback_loop": MutationAction("add_feedback_loop", motif_feedback_loop),
-            "add_binding": MutationAction("add_binding", random_bind),
-            "add_phosphorylation": MutationAction("add_phosphorylation", random_phos),
-            "add_dephosphorylation": MutationAction("add_dephosphorylation", random_dephos),
-            "add_inhibition": MutationAction("add_inhibition", random_inhibit),
-            "add_unbinding": MutationAction("add_unbinding", random_unbind),
-            "remove_rule": MutationAction("remove_rule", random_remove_rule),
-            "modify_rate": MutationAction("modify_rate", random_modify_rate),
-            "remove_site": MutationAction("remove_site", random_remove_site),
-            "duplicate_protein": MutationAction("duplicate_protein", random_duplicate),
-            "remove_protein": MutationAction("remove_protein", random_remove_protein),
+            "add_site": MutationAction("add_site", self._action_random_add_site),
+            "add_kinase_cascade": MutationAction("add_kinase_cascade", self.add_kinase_cascade),
+            "add_feedback_loop": MutationAction("add_feedback_loop", self.add_negative_feedback_loop),
+            "add_binding": MutationAction("add_binding", self._action_random_bind),
+            "add_phosphorylation": MutationAction("add_phosphorylation", self._action_random_phos),
+            "add_dephosphorylation": MutationAction("add_dephosphorylation", self._action_random_dephos),
+            "add_inhibition": MutationAction("add_inhibition", self._action_random_inhibit),
+            "add_unbinding": MutationAction("add_unbinding", self._action_random_unbind),
+            "remove_rule": MutationAction("remove_rule", self._action_random_remove_rule),
+            "modify_rate": MutationAction("modify_rate", self._action_random_modify_rate),
+            "remove_site": MutationAction("remove_site", self._action_random_remove_site),
+            "duplicate_protein": MutationAction("duplicate_protein", self._action_random_duplicate),
+            "remove_protein": MutationAction("remove_protein", self._action_random_remove_protein),
         }
