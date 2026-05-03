@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from modern_biojazz.bngl_converter import bngl_to_reaction_network
+from modern_biojazz.bngl_converter import bngl_to_reaction_network, _parse_parameters
 from unittest.mock import patch
 
 from modern_biojazz.e2e_pipeline import run_e2e, E2EConfig, _fallback_assembly, _run_discovery
@@ -13,6 +13,86 @@ from modern_biojazz.pathway_discovery import (
     load_discovery_snapshot,
     save_discovery_snapshot,
 )
+
+
+# ── BNGL converter ───────────────────────────────────────────────────
+
+
+def test_bngl_converter_parses_molecule_types(fixtures_dir: Path):
+    bngl = (fixtures_dir / "sample_indra.bngl").read_text()
+    net = bngl_to_reaction_network(bngl)
+
+    assert "JAK1" in net.proteins
+    assert "STAT3" in net.proteins
+    assert "SOCS3" in net.proteins
+
+    stat3 = net.proteins["STAT3"]
+    site_names = [s.name for s in stat3.sites]
+    assert "Y705" in site_names
+    y705 = next(s for s in stat3.sites if s.name == "Y705")
+    assert y705.site_type == "modification"
+    assert "u" in y705.states and "p" in y705.states
+
+
+def test_bngl_converter_parses_rules(fixtures_dir: Path):
+    bngl = (fixtures_dir / "sample_indra.bngl").read_text()
+    net = bngl_to_reaction_network(bngl)
+
+    assert len(net.rules) >= 4  # 4 forward + 1 reverse from r3
+    rule_types = {r.rule_type for r in net.rules}
+    assert "phosphorylation" in rule_types
+    assert "inhibition" in rule_types
+
+    # Check that the reversible rule produced both forward and reverse.
+    r3_names = [r.name for r in net.rules if r.name.startswith("r3")]
+    assert len(r3_names) == 2  # r3 and r3_rev
+
+
+def test_bngl_converter_reads_parameters(fixtures_dir: Path):
+    bngl = (fixtures_dir / "sample_indra.bngl").read_text()
+    net = bngl_to_reaction_network(bngl)
+
+    r1 = next(r for r in net.rules if r.name == "r1")
+    assert abs(r1.rate - 0.07) < 1e-6
+
+
+def test_bngl_converter_skips_invalid_parameters():
+    bngl_text = """
+    begin parameters
+    valid_param 1.5
+    invalid_param not_a_number
+    valid_param2 2.0
+    end parameters
+    """
+    params = _parse_parameters(bngl_text)
+    assert "valid_param" in params
+    assert params["valid_param"] == 1.5
+    assert "valid_param2" in params
+    assert params["valid_param2"] == 2.0
+    assert "invalid_param" not in params
+
+
+def test_bngl_converter_reads_seed_species(fixtures_dir: Path):
+    bngl = (fixtures_dir / "sample_indra.bngl").read_text()
+    net = bngl_to_reaction_network(bngl)
+
+    ic = net.metadata.get("initial_concentrations", {})
+    assert ic.get("JAK1", 0) == 1.0
+    # STAT3 is represented in state-qualified form now.
+    assert ic.get("STAT3__Y705_u", 0) == 1.0
+
+
+def test_bngl_converter_roundtrip_to_simulation(fixtures_dir: Path):
+    """Parsed BNGL network can be simulated without errors."""
+    from modern_biojazz.simulation import LocalCatalystEngine, FitnessEvaluator, SimulationOptions
+
+    bngl = (fixtures_dir / "sample_indra.bngl").read_text()
+    net = bngl_to_reaction_network(bngl)
+    engine = LocalCatalystEngine()
+    result = engine.simulate(net, SimulationOptions(t_end=5.0, dt=1.0, solver="BDF"))
+    assert len(result["trajectory"]) == 6
+    score = FitnessEvaluator(target_output=1.0).score(simulation_result=result)
+    assert score >= 0.0
 
 
 # ── Pathway discovery snapshots ──────────────────────────────────────
