@@ -91,7 +91,10 @@ class OmniPathDiscovery:
         url = f"{self.base_url.rstrip('/')}/interactions?{query}"
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            raw_data = resp.read(10 * 1024 * 1024)
+            if resp.read(1):
+                raise ValueError("Response payload exceeded 10MB limit")
+            return json.loads(raw_data.decode("utf-8"))
 
     def _extract_species(
         self,
@@ -133,7 +136,10 @@ class OmniPathDiscovery:
         url = f"{self.base_url.rstrip('/')}/annotations?{query}"
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            raw_data = resp.read(10 * 1024 * 1024)
+            if resp.read(1):
+                raise ValueError("Response payload exceeded 10MB limit")
+            data = json.loads(raw_data.decode("utf-8"))
 
         needle = pathway_query.lower()
         genes: Set[str] = set()

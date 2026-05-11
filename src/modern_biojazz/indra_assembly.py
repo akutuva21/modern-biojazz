@@ -103,7 +103,10 @@ class INDRAAssembler:
             )
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
+                    raw_data = resp.read(10 * 1024 * 1024)
+                    if resp.read(1):
+                        raise ValueError("Response payload exceeded 10MB limit")
+                    data = json.loads(raw_data.decode("utf-8"))
                     stmts = data.get("statements", data) if isinstance(data, dict) else data
                     if isinstance(stmts, list):
                         all_stmts.extend(stmts)
