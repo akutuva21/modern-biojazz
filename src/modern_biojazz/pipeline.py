@@ -7,6 +7,8 @@ from .evolution import LLMEvolutionEngine, EvolutionConfig, EvolutionResult
 from .grounding import GroundingEngine, GroundingResult
 from .site_graph import ReactionNetwork
 
+_SUFFIX_PATTERN = re.compile(r"(_P|_inh)+$")
+
 
 @dataclass
 class PipelineConfig:
@@ -61,9 +63,6 @@ class ModernBioJazzPipeline:
         return PipelineResult(evolution=evolution, grounding=grounding_result)
 
     def _grounding_constraint_filter(self, allowed_symbols: set[str]):
-        # Regex to strip trailing _P or _inh iteratively
-        suffix_pattern = re.compile(r"(_P|_inh)+$")
-
         _base_cache: dict[str, str] = {}
 
         def _base_protein(token: str) -> str:
@@ -76,7 +75,7 @@ class ModernBioJazzPipeline:
             if "_dup" in token:
                 token = token[: token.index("_dup")]
             else:
-                token = suffix_pattern.sub("", token)
+                token = _SUFFIX_PATTERN.sub("", token)
 
             _base_cache[orig_token] = token
             return token
