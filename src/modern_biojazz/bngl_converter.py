@@ -10,6 +10,7 @@ use an ANTLR4 grammar.  It covers:
 """
 from __future__ import annotations
 
+import functools
 import re
 from typing import Dict, List, Optional, Tuple
 
@@ -66,11 +67,16 @@ def bngl_to_reaction_network(
 # ── Block extraction ─────────────────────────────────────────────────
 
 
-def _extract_block(text: str, block_name: str) -> str:
-    pattern = re.compile(
+@functools.lru_cache(maxsize=16)
+def _get_block_pattern(block_name: str) -> re.Pattern:
+    return re.compile(
         rf"begin\s+{block_name}\s*\n(.*?)end\s+{block_name}",
         re.DOTALL | re.IGNORECASE,
     )
+
+
+def _extract_block(text: str, block_name: str) -> str:
+    pattern = _get_block_pattern(block_name)
     m = pattern.search(text)
     return m.group(1).strip() if m else ""
 
