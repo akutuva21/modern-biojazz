@@ -52,7 +52,7 @@ class CatalystHTTPClient:
     retry_count: int = 2
     _allow_insecure_for_testing: bool = False
 
-    def _validate_url(self, url: str) -> None:
+    def _validate_url(self, url: str) -> str:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":
             raise ValueError(f"Insecure scheme: {parsed.scheme}")
@@ -61,22 +61,31 @@ class CatalystHTTPClient:
         if not hostname:
             raise ValueError("Invalid URL: missing hostname")
 
+        port = parsed.port or 443
+
         try:
-            addr_info = socket.getaddrinfo(hostname, None)
+            addr_info = socket.getaddrinfo(hostname, port, 0, socket.SOCK_STREAM)
         except socket.gaierror as e:
             raise ValueError(f"Could not resolve hostname: {e}")
 
+        safe_ip = None
         for _, _, _, _, sockaddr in addr_info:
             ip = sockaddr[0]
             ip_obj = ipaddress.ip_address(ip)
-            if (
+            if not (
                 ip_obj.is_private
                 or ip_obj.is_loopback
                 or ip_obj.is_link_local
                 or ip_obj.is_multicast
                 or ip_obj.is_reserved
             ):
-                raise ValueError(f"URL resolves to internal/reserved IP address: {ip}")
+                safe_ip = ip
+                break
+
+        if not safe_ip:
+            raise ValueError(f"URL resolves to internal/reserved IP address: {hostname}")
+
+        return safe_ip
 
     def simulate(
         self,
@@ -90,8 +99,10 @@ class CatalystHTTPClient:
             "solver": options.solver,
             "initial_conditions": options.initial_conditions or {},
         }
+
+        safe_ip = None
         if not self._allow_insecure_for_testing:
-            self._validate_url(self.base_url)
+            safe_ip = self._validate_url(self.base_url)
 
         last_error: Exception | None = None
         for attempt in range(self.retry_count + 1):
@@ -102,11 +113,37 @@ class CatalystHTTPClient:
                     headers={"Content-Type": "application/json"},
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
+
+                if safe_ip:
+                    import http.client
+                    import ssl
+
+                    class SafeHTTPSConnection(http.client.HTTPSConnection):
+                        def connect(self):
+                            self.sock = socket.create_connection((safe_ip, self.port), self.timeout, self.source_address)
+                            if getattr(self, "_tunnel_host", None):
+                                self._tunnel()
+                            if getattr(self, "_context", None) is None:
+                                self._context = ssl._create_default_https_context()
+                            self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+                    class SafeHTTPSHandler(urllib.request.HTTPSHandler):
+                        def https_open(self, req):
+                            return self.do_open(SafeHTTPSConnection, req)
+
+                    opener = urllib.request.build_opener(SafeHTTPSHandler())
+                    response_context = opener.open(req, timeout=self.timeout_seconds)
+                else:
+                    response_context = urllib.request.urlopen(req, timeout=self.timeout_seconds)
+
+                with response_context as response:
                     status = getattr(response, "status", 200)
                     if status >= 400:
                         raise RuntimeError(f"Catalyst service returned HTTP {status}")
-                    return json.loads(response.read().decode("utf-8"))
+                    raw_data = response.read(10 * 1024 * 1024)
+                    if response.read(1):
+                        raise ValueError("Response payload exceeded 10MB limit")
+                    return json.loads(raw_data.decode("utf-8"))
             except Exception as exc:
                 last_error = exc
                 if attempt < self.retry_count:

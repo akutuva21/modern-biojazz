@@ -46,9 +46,12 @@ def test_llm_denoising_proposer(mock_open, mock_validate):
     # Mock the LLM response
     mock_validate.return_value = "192.168.1.1" # not actually tested but returned safe IP
     mock_response = MagicMock()
-    mock_response.read.return_value = json.dumps({
-        "choices": [{"message": {"content": '{"actions": ["add_binding", "remove_rule"]}'}}]
-    }).encode("utf-8")
+    mock_response.read.side_effect = [
+        json.dumps({
+            "choices": [{"message": {"content": '{"actions": ["add_binding", "remove_rule"]}'}}]
+        }).encode("utf-8"),
+        b"",  # Second call to read(1) returns empty byte string to pass 10MB check
+    ]
     mock_open.return_value.__enter__.return_value = mock_response
 
     inner = OpenAICompatibleProposer(base_url="https://example", api_key="key", model="model")
