@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import re
 import socket
 import time
@@ -10,10 +11,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import List, Protocol
 
+logger = logging.getLogger(__name__)
+
 
 class ActionProposer(Protocol):
-    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
-        ...
+    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]: ...
 
 
 @dataclass
@@ -103,8 +105,8 @@ class OpenAICompatibleProposer:
         if text.startswith("{") and text.endswith("}"):
             try:
                 return json.loads(text)
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                logger.debug(f"Direct JSON parse failed: {e}")
 
         decoder = json.JSONDecoder()
         for match in re.finditer(r"\{", text):
@@ -113,7 +115,8 @@ class OpenAICompatibleProposer:
                 obj, _ = decoder.raw_decode(text[start:])
                 if isinstance(obj, dict) and "actions" in obj:
                     return obj
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                logger.debug(f"Raw JSON decode failed at position {start}: {e}")
                 continue
 
         fenced = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", text, flags=re.IGNORECASE)
@@ -122,8 +125,8 @@ class OpenAICompatibleProposer:
                 obj = json.loads(fenced.group(1))
                 if isinstance(obj, dict):
                     return obj
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                logger.debug(f"Fenced JSON parse failed: {e}")
 
         if not text:
             return {"actions": []}
@@ -199,6 +202,7 @@ class LLMDenoisingProposer:
 
     def record_feedback(self, score: float, notes: str) -> None:
         self.inner.record_feedback(score, notes)
+
 
 @dataclass
 class SafeActionFilterProposer:
