@@ -6,7 +6,7 @@ def test_indra_graph_proposer_success(mock_urlopen):
     # Mock INDRA REST API Response
     mock_response = MagicMock()
     # E.g., querying for STAT3 returns a phosphorylation statement
-    mock_response.read.return_value = b"""
+    mock_response.read.side_effect = [b"""
     {
         "statements": [
             {
@@ -16,7 +16,7 @@ def test_indra_graph_proposer_success(mock_urlopen):
             }
         ]
     }
-    """
+    """, b""]
     mock_urlopen.return_value.__enter__.return_value = mock_response
 
     proposer = INDRAGraphProposer()

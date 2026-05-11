@@ -4,6 +4,7 @@ Two modes:
   1. Live: query INDRA DB REST API (no key needed) → statements → BNGL text
   2. Offline: load pre-assembled BNGL from file
 """
+
 from __future__ import annotations
 
 import json
@@ -84,16 +85,20 @@ class INDRAAssembler:
 
         return all_statements
 
-    def _query_db_rest(self, species: List[str], stmt_type: str) -> List[Dict[str, Any]]:
+    def _query_db_rest(
+        self, species: List[str], stmt_type: str
+    ) -> List[Dict[str, Any]]:
         url = f"{self.db_rest_url.rstrip('/')}/statements/from_agents?format=json"
 
         all_stmts = []
         for s in species:
-            payload = json.dumps({
-                "agent0": s,
-                "stmt_type": stmt_type,
-                "ev_limit": 5,
-            }).encode("utf-8")
+            payload = json.dumps(
+                {
+                    "agent0": s,
+                    "stmt_type": stmt_type,
+                    "ev_limit": 5,
+                }
+            ).encode("utf-8")
 
             req = urllib.request.Request(
                 url=url,
@@ -103,8 +108,13 @@ class INDRAAssembler:
             )
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    stmts = data.get("statements", data) if isinstance(data, dict) else data
+                    raw_data = resp.read(10 * 1024 * 1024)
+                    if resp.read(1):
+                        raise ValueError("INDRA response payload exceeded 10MB limit")
+                    data = json.loads(raw_data.decode("utf-8"))
+                    stmts = (
+                        data.get("statements", data) if isinstance(data, dict) else data
+                    )
                     if isinstance(stmts, list):
                         all_stmts.extend(stmts)
             except Exception:
@@ -237,19 +247,26 @@ class INDRAGraphProposer:
     assembler: INDRAAssembler = field(default_factory=INDRAAssembler)
     rng: random.Random = field(default_factory=random.Random)
 
-    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
+    def propose(
+        self, model_code: str, action_names: List[str], budget: int
+    ) -> List[str]:
         # Parse available proteins from model_code (format: '...proteins=['A', 'B'];...')
         proteins = []
         try:
             import re
+
             m = re.search(r"proteins=\[(.*?)\]", model_code)
             if m:
                 raw = m.group(1).replace("'", "").replace('"', "").split(",")
-                proteins = [p.strip() for p in raw if p.strip() and not p.strip().startswith("M_")]
+                proteins = [
+                    p.strip()
+                    for p in raw
+                    if p.strip() and not p.strip().startswith("M_")
+                ]
         except Exception as e:
             logger.warning("Failed to parse proteins from model_code: %s", e)
 
-        proteins = [p for p in proteins if p not in ['0', 'Trash']]
+        proteins = [p for p in proteins if p not in ["0", "Trash"]]
 
         if not proteins:
             return [self.rng.choice(action_names) for _ in range(max(1, budget))]
@@ -322,10 +339,7 @@ class INDRAGraphProposer:
 
 
 def _handle_phosphorylation(
-    stmt: Dict[str, Any],
-    kinase: str,
-    substrate: str,
-    state: AssemblyState
+    stmt: Dict[str, Any], kinase: str, substrate: str, state: AssemblyState
 ) -> None:
     site = _extract_site(stmt) or "phospho"
     state.mol_types.setdefault(substrate, {})[site] = ["u", "p"]
@@ -339,10 +353,7 @@ def _handle_phosphorylation(
 
 
 def _handle_dephosphorylation(
-    stmt: Dict[str, Any],
-    kinase: str,
-    substrate: str,
-    state: AssemblyState
+    stmt: Dict[str, Any], kinase: str, substrate: str, state: AssemblyState
 ) -> None:
     site = _extract_site(stmt) or "phospho"
     state.mol_types.setdefault(substrate, {})[site] = ["u", "p"]
@@ -356,10 +367,7 @@ def _handle_dephosphorylation(
 
 
 def _handle_complex(
-    stmt: Dict[str, Any],
-    kinase: str,
-    substrate: str,
-    state: AssemblyState
+    stmt: Dict[str, Any], kinase: str, substrate: str, state: AssemblyState
 ) -> None:
     state.mol_types.setdefault(kinase, {}).setdefault(f"b_{substrate}", [])
     state.mol_types.setdefault(substrate, {}).setdefault(f"b_{kinase}", [])
@@ -375,12 +383,11 @@ def _handle_complex(
 
 
 def _handle_inhibition(
-    stmt: Dict[str, Any],
-    kinase: str,
-    substrate: str,
-    state: AssemblyState
+    stmt: Dict[str, Any], kinase: str, substrate: str, state: AssemblyState
 ) -> None:
-    state.mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
+    state.mol_types.setdefault(substrate, {}).setdefault(
+        "activity", ["active", "inactive"]
+    )
     pname = f"ki_{state.param_counter}"
     state.params[pname] = _extract_belief(stmt) * 0.05
     state.rules.append(
@@ -391,12 +398,11 @@ def _handle_inhibition(
 
 
 def _handle_activation(
-    stmt: Dict[str, Any],
-    kinase: str,
-    substrate: str,
-    state: AssemblyState
+    stmt: Dict[str, Any], kinase: str, substrate: str, state: AssemblyState
 ) -> None:
-    state.mol_types.setdefault(substrate, {}).setdefault("activity", ["active", "inactive"])
+    state.mol_types.setdefault(substrate, {}).setdefault(
+        "activity", ["active", "inactive"]
+    )
     pname = f"ka_{state.param_counter}"
     state.params[pname] = _extract_belief(stmt) * 0.1
     state.rules.append(

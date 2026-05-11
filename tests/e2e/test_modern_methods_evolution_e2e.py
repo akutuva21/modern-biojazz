@@ -21,7 +21,7 @@ def test_evolution_with_indra_proposer_e2e(mock_urlopen):
     """
     # 1. Mock INDRA DB Response
     mock_response = MagicMock()
-    mock_response.read.return_value = b"""
+    mock_response.read.side_effect = [b"""
     {
         "statements": [
             {
@@ -30,7 +30,7 @@ def test_evolution_with_indra_proposer_e2e(mock_urlopen):
             }
         ]
     }
-    """
+    """, b""]
     mock_urlopen.return_value.__enter__.return_value = mock_response
 
     # 2. Setup standard simulation and evolution components
@@ -225,7 +225,7 @@ def test_indra_proposer_phosphorylation_mek_erk_e2e(mock_urlopen):
     (e.g., MEK phosphorylating ERK) and triggers `add_phosphorylation` mutation.
     """
     mock_response = MagicMock()
-    mock_response.read.return_value = b"""
+    mock_response.read.side_effect = [b"""
     {
         "statements": [
             {
@@ -235,7 +235,7 @@ def test_indra_proposer_phosphorylation_mek_erk_e2e(mock_urlopen):
             }
         ]
     }
-    """
+    """, b""]
     mock_urlopen.return_value.__enter__.return_value = mock_response
 
     sim_backend = LocalCatalystEngine()
@@ -400,7 +400,7 @@ def test_indra_proposer_activation_caspase_e2e(mock_urlopen):
     (e.g., CASP9 activating CASP3) and triggers `add_site` mutation.
     """
     mock_response = MagicMock()
-    mock_response.read.return_value = b"""
+    mock_response.read.side_effect = [b"""
     {
         "statements": [
             {
@@ -410,7 +410,7 @@ def test_indra_proposer_activation_caspase_e2e(mock_urlopen):
             }
         ]
     }
-    """
+    """, b""]
     mock_urlopen.return_value.__enter__.return_value = mock_response
 
     sim_backend = LocalCatalystEngine()
