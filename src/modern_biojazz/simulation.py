@@ -26,8 +26,7 @@ class SimulationBackend(Protocol):
         self,
         network: ReactionNetwork,
         options: SimulationOptions,
-    ) -> Dict[str, Any]:
-        ...
+    ) -> Dict[str, Any]: ...
 
 
 class FitnessScorer(Protocol):
@@ -41,8 +40,7 @@ class FitnessScorer(Protocol):
         dt: float = 1.0,
         solver: str = "Rodas5P",
         initial_conditions: Dict[str, float] | None = None,
-    ) -> float:
-        ...
+    ) -> float: ...
 
 
 @dataclass
@@ -106,7 +104,10 @@ class CatalystHTTPClient:
                     status = getattr(response, "status", 200)
                     if status >= 400:
                         raise RuntimeError(f"Catalyst service returned HTTP {status}")
-                    return json.loads(response.read().decode("utf-8"))
+                    raw_data = response.read(10 * 1024 * 1024)
+                    if response.read(1):
+                        raise ValueError("Catalyst service response payload exceeded 10MB limit")
+                    return json.loads(raw_data.decode("utf-8"))
             except Exception as exc:
                 last_error = exc
                 if attempt < self.retry_count:
@@ -342,7 +343,9 @@ class UltrasensitiveFitnessEvaluator:
             series = result.get("trajectory", [])
             final = 0.0
             if series:
-                final = float(series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0)))
+                final = float(
+                    series[-1].get("species", {}).get(self.config.output_species, series[-1].get("output", 0.0))
+                )
             responses.append(max(1e-8, final))
 
         lo = responses[0]
