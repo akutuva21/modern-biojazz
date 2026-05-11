@@ -41,16 +41,17 @@ def test_safe_filter_proposer_propagates_feedback():
 
 
 @patch("modern_biojazz.llm_proposer.OpenAICompatibleProposer._validate_url")
-@patch("urllib.request.urlopen")
-def test_llm_denoising_proposer(mock_urlopen, mock_validate):
+@patch("urllib.request.OpenerDirector.open")
+def test_llm_denoising_proposer(mock_open, mock_validate):
     # Mock the LLM response
+    mock_validate.return_value = "192.168.1.1" # not actually tested but returned safe IP
     mock_response = MagicMock()
     mock_response.read.return_value = json.dumps({
         "choices": [{"message": {"content": '{"actions": ["add_binding", "remove_rule"]}'}}]
     }).encode("utf-8")
-    mock_urlopen.return_value.__enter__.return_value = mock_response
+    mock_open.return_value.__enter__.return_value = mock_response
 
-    inner = OpenAICompatibleProposer(base_url="http://example", api_key="key", model="model")
+    inner = OpenAICompatibleProposer(base_url="https://example", api_key="key", model="model")
     denoiser = LLMDenoisingProposer(inner)
 
     actions = denoiser.propose("n_proteins=2;rules=[];proteins=['A', 'B']", ["add_binding", "remove_rule"], 2)
