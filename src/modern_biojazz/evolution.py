@@ -1,16 +1,18 @@
 import json
+import logging
 import random
 from dataclasses import dataclass
 from typing import Callable, List, Protocol
 
 from .mutation import GraphMutator
+
+logger = logging.getLogger(__name__)
 from .site_graph import ReactionNetwork
 from .simulation import SimulationBackend, FitnessScorer
 
 
 class LLMProposer(Protocol):
-    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
-        ...
+    def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]: ...
 
 
 @dataclass
@@ -80,9 +82,9 @@ class LLMEvolutionEngine:
         }
         try:
             self.proposer.record_feedback(score, json.dumps(proto))
-        except Exception:
+        except Exception as e:
             # Don't break evolution if proposer feedback path is untrusted.
-            pass
+            logger.warning(f"Failed to record proposer feedback: {e}")
 
     def _model_code(self, network: ReactionNetwork) -> str:
         rule_types: dict[str, int] = {}
@@ -192,6 +194,7 @@ class LLMEvolutionEngine:
         best_score, best_network = scored_initial[0]
         best = best_network.copy()
         history: List[float] = [best_score]
+
         def calc_unique_population(island_pop: List[ReactionNetwork]) -> int:
             fingerprints = set(self._network_fingerprint(n) for n in island_pop)
             return len(fingerprints)
