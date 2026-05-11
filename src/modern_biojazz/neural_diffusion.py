@@ -1,14 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import random
 from modern_biojazz.site_graph import ReactionNetwork, Protein, Rule
+
 
 class SimpleContactMapDenoiser(nn.Module):
     """
     A very simple MLPMixer-like denoiser for N x N contact maps.
     Predicts the noise added to an adjacency matrix.
     """
+
     def __init__(self, n_nodes: int, hidden_dim: int = 64, time_embed_dim: int = 32):
         super().__init__()
         self.n_nodes = n_nodes
@@ -24,7 +25,7 @@ class SimpleContactMapDenoiser(nn.Module):
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, n_nodes * n_nodes)
+            nn.Linear(hidden_dim, n_nodes * n_nodes),
         )
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -41,6 +42,7 @@ class SimpleContactMapDenoiser(nn.Module):
 
 class DDPMContactMapTrainer:
     """Trains and samples from a simple continuous DDPM for network contact maps."""
+
     def __init__(self, n_nodes: int, n_steps: int = 100, device: str = "cpu"):
         self.n_nodes = n_nodes
         self.n_steps = n_steps
@@ -54,7 +56,9 @@ class DDPMContactMapTrainer:
         self.alpha = 1.0 - self.beta
         self.alpha_bar = torch.cumprod(self.alpha, dim=0)
 
-    def extract_contact_map(self, network: ReactionNetwork, max_nodes: int) -> torch.Tensor:
+    def extract_contact_map(
+        self, network: ReactionNetwork, max_nodes: int
+    ) -> torch.Tensor:
         """Converts a network into an N x N adjacency matrix."""
         mat = torch.zeros((max_nodes, max_nodes))
         proteins = sorted(list(network.proteins.keys()))
@@ -70,8 +74,8 @@ class DDPMContactMapTrainer:
             if len(rule.reactants) >= 2:
                 r1, r2 = rule.reactants[0], rule.reactants[1]
                 # Strip suffixes
-                r1_base = r1.split('_')[0] if '_' in r1 else r1
-                r2_base = r2.split('_')[0] if '_' in r2 else r2
+                r1_base = r1.split("_")[0] if "_" in r1 else r1
+                r2_base = r2.split("_")[0] if "_" in r2 else r2
 
                 if r1_base in p2idx and r2_base in p2idx:
                     idx1, idx2 = p2idx[r1_base], p2idx[r2_base]
@@ -123,7 +127,9 @@ class DDPMContactMapTrainer:
             alpha_bar_t = self.alpha_bar[t].view(-1, 1, 1)
 
             # DDPM reverse step
-            x = (1 / torch.sqrt(alpha_t)) * (x - ((1 - alpha_t) / torch.sqrt(1 - alpha_bar_t)) * pred_noise)
+            x = (1 / torch.sqrt(alpha_t)) * (
+                x - ((1 - alpha_t) / torch.sqrt(1 - alpha_bar_t)) * pred_noise
+            )
             x = x + torch.sqrt(self.beta[t].view(-1, 1, 1)) * z
 
         # Threshold to create binary adjacency matrix
@@ -153,7 +159,7 @@ class DDPMContactMapTrainer:
                             rule_type="binding",
                             reactants=[p1, p2],
                             products=[comp],
-                            rate=0.1
+                            rate=0.1,
                         )
                     )
                     rule_idx += 1
