@@ -1,12 +1,11 @@
+from __future__ import annotations
+
 import json
-import logging
 import random
 from dataclasses import dataclass
 from typing import Callable, List, Protocol
 
 from .mutation import GraphMutator
-
-logger = logging.getLogger(__name__)
 from .site_graph import ReactionNetwork
 from .simulation import SimulationBackend, FitnessScorer
 
@@ -82,9 +81,9 @@ class LLMEvolutionEngine:
         }
         try:
             self.proposer.record_feedback(score, json.dumps(proto))
-        except Exception as e:
+        except Exception:
             # Don't break evolution if proposer feedback path is untrusted.
-            logger.warning("Failed to record CEGIS feedback: %s", e)
+            pass
 
     def _model_code(self, network: ReactionNetwork) -> str:
         rule_types: dict[str, int] = {}
@@ -106,13 +105,29 @@ class LLMEvolutionEngine:
             f"rules_preview={preview_rules}"
         )
 
-    def _mutate_candidate(self, network: ReactionNetwork, budget: int) -> ReactionNetwork:
+    def _mutate_candidate(
+        self,
+        network: ReactionNetwork,
+        budget: int,
+        precomputed_model_code: str | None = None,
+        precomputed_action_keys: list[str] | None = None,
+    ) -> ReactionNetwork:
         last_child: ReactionNetwork | None = None
         for _ in range(8):
             child = network.copy()
             last_child = child
+
+            # Use precomputed values if provided (optimization for bulk generation from identical seed)
+            model_code = precomputed_model_code if precomputed_model_code is not None else self._model_code(child)
+            if precomputed_action_keys is not None:
+                action_keys = precomputed_action_keys
+            else:
+                action_keys = list(self.mutator.action_library(child).keys())
+
+            choices = self.proposer.propose(model_code, action_keys, budget)
+
+            # We still need the action library dictionary to apply the chosen actions
             actions = self.mutator.action_library(child)
-            choices = self.proposer.propose(self._model_code(child), list(actions.keys()), budget)
             for action_name in choices:
                 action = actions.get(action_name)
                 if action is not None:
@@ -179,25 +194,87 @@ class LLMEvolutionEngine:
 
         return score
 
-    def run(self, seed: ReactionNetwork, config: EvolutionConfig) -> EvolutionResult:
+    def _calc_unique_population(self, islands: List[List[ReactionNetwork]]) -> int:
+        def calc_island_unique(island_pop: List[ReactionNetwork]) -> int:
+            fingerprints = set(self._network_fingerprint(n) for n in island_pop)
+            return len(fingerprints)
+
+        return sum(calc_island_unique(island) for island in islands)
+
+    def _evolve_island(
+        self,
+        island_pop: List[ReactionNetwork],
+        best_score: float,
+        config: EvolutionConfig,
+        eval_cache: dict[str, float],
+    ) -> tuple[float, ReactionNetwork | None, List[ReactionNetwork], List[float]]:
+        scored: List[tuple[float, ReactionNetwork]] = []
+        for n in island_pop:
+            fp = self._network_fingerprint(n)
+            try:
+                score = eval_cache[fp]
+            except KeyError:
+                score = self._evaluate(n, config)
+                eval_cache[fp] = score
+            scored.append((score, n))
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        island_top_scores = [s for s, _ in scored[:3]]
+
+        island_best_score, island_best = scored[0]
+        new_best_score = best_score
+        new_best = None
+        if island_best_score > best_score:
+            new_best_score = island_best_score
+            new_best = island_best.copy()
+
+        survivors = [n for _, n in scored[: max(2, config.population_size // 3)]]
+        new_pop: List[ReactionNetwork] = [island_best.copy()]
+        while len(new_pop) < config.population_size:
+            parent = self.rng.choice(survivors)
+            child = self._mutate_candidate(parent, config.mutations_per_candidate)
+            new_pop.append(child)
+
+        return new_best_score, new_best, new_pop, island_top_scores
+
+    def _initialize_islands(self, seed: ReactionNetwork, config: EvolutionConfig) -> List[List[ReactionNetwork]]:
         islands: List[List[ReactionNetwork]] = []
+
+        # Precompute constants for initial population generation to avoid redundant work
+        seed_model_code = self._model_code(seed)
+        seed_action_keys = list(self.mutator.action_library(seed).keys())
+
         for _ in range(max(1, config.islands)):
             island_pop = [seed.copy()] + [
-                self._mutate_candidate(seed, config.mutations_per_candidate)
+                self._mutate_candidate(
+                    seed,
+                    config.mutations_per_candidate,
+                    precomputed_model_code=seed_model_code,
+                    precomputed_action_keys=seed_action_keys,
+                )
                 for _ in range(max(0, config.population_size - 1))
             ]
             islands.append(island_pop)
+        return islands
+
+    def run(self, seed: ReactionNetwork, config: EvolutionConfig) -> EvolutionResult:
+        eval_cache: dict[str, float] = {}
+        islands = self._initialize_islands(seed, config)
 
         all_initial = [n for island in islands for n in island]
-        scored_initial = [(self._evaluate(n, config), n) for n in all_initial]
+        scored_initial: List[tuple[float, ReactionNetwork]] = []
+        for n in all_initial:
+            fp = self._network_fingerprint(n)
+            try:
+                score = eval_cache[fp]
+            except KeyError:
+                score = self._evaluate(n, config)
+                eval_cache[fp] = score
+            scored_initial.append((score, n))
         scored_initial.sort(key=lambda x: x[0], reverse=True)
         best_score, best_network = scored_initial[0]
         best = best_network.copy()
         history: List[float] = [best_score]
-
-        def calc_unique_population(island_pop: List[ReactionNetwork]) -> int:
-            fingerprints = set(self._network_fingerprint(n) for n in island_pop)
-            return len(fingerprints)
 
         generation_summary: List[GenerationSummary] = [
             GenerationSummary(
@@ -206,29 +283,23 @@ class LLMEvolutionEngine:
                 best_n_proteins=len(best.proteins),
                 best_n_rules=len(best.rules),
                 top_scores=[s for s, _ in scored_initial[: min(5, len(scored_initial))]],
-                unique_population=sum(calc_unique_population(island) for island in islands),
+                unique_population=self._calc_unique_population(islands),
             )
         ]
 
         for generation in range(config.generations):
             generation_top_scores = []
             for island_idx, island_pop in enumerate(islands):
-                scored = [(self._evaluate(n, config), n) for n in island_pop]
-                scored.sort(key=lambda x: x[0], reverse=True)
+                new_best_score, new_best, new_pop, island_top_scores = self._evolve_island(
+                    island_pop, best_score, config, eval_cache
+                )
 
-                generation_top_scores.extend([s for s, _ in scored[:3]])
+                generation_top_scores.extend(island_top_scores)
 
-                island_best_score, island_best = scored[0]
-                if island_best_score > best_score:
-                    best_score = island_best_score
-                    best = island_best.copy()
+                if new_best is not None:
+                    best_score = new_best_score
+                    best = new_best
 
-                survivors = [n for _, n in scored[: max(2, config.population_size // 3)]]
-                new_pop: List[ReactionNetwork] = [island_best.copy()]
-                while len(new_pop) < config.population_size:
-                    parent = self.rng.choice(survivors)
-                    child = self._mutate_candidate(parent, config.mutations_per_candidate)
-                    new_pop.append(child)
                 islands[island_idx] = new_pop
 
             if (generation + 1) % max(1, config.migration_interval) == 0 and len(islands) > 1:
@@ -245,7 +316,7 @@ class LLMEvolutionEngine:
                     best_n_proteins=len(best.proteins),
                     best_n_rules=len(best.rules),
                     top_scores=generation_top_scores[:5],
-                    unique_population=sum(calc_unique_population(island) for island in islands),
+                    unique_population=self._calc_unique_population(islands),
                 )
             )
 
