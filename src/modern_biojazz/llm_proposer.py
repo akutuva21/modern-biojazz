@@ -82,7 +82,10 @@ class OpenAICompatibleProposer:
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
-                    raw = json.loads(response.read().decode("utf-8"))
+                    raw_data = response.read(10 * 1024 * 1024)
+                    if response.read(1):
+                        raise ValueError("Response payload exceeded 10MB limit")
+                    raw = json.loads(raw_data.decode("utf-8"))
                 break
             except Exception as exc:
                 last_error = exc
@@ -180,7 +183,10 @@ class LLMDenoisingProposer:
                     method="POST",
                 )
                 with urllib.request.urlopen(req, timeout=self.inner.timeout_seconds) as response:
-                    raw = json.loads(response.read().decode("utf-8"))
+                    raw_data = response.read(10 * 1024 * 1024)
+                    if response.read(1):
+                        raise ValueError("Response payload exceeded 10MB limit")
+                    raw = json.loads(raw_data.decode("utf-8"))
                 break
             except Exception as exc:
                 last_error = exc

@@ -106,7 +106,10 @@ class CatalystHTTPClient:
                     status = getattr(response, "status", 200)
                     if status >= 400:
                         raise RuntimeError(f"Catalyst service returned HTTP {status}")
-                    return json.loads(response.read().decode("utf-8"))
+                    raw_data = response.read(10 * 1024 * 1024)
+                    if response.read(1):
+                        raise ValueError("Catalyst service response payload exceeded 10MB limit")
+                    return json.loads(raw_data.decode("utf-8"))
             except Exception as exc:
                 last_error = exc
                 if attempt < self.retry_count:

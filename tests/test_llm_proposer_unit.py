@@ -45,9 +45,13 @@ def test_safe_filter_proposer_propagates_feedback():
 def test_llm_denoising_proposer(mock_urlopen, mock_validate):
     # Mock the LLM response
     mock_response = MagicMock()
-    mock_response.read.return_value = json.dumps({
-        "choices": [{"message": {"content": '{"actions": ["add_binding", "remove_rule"]}'}}]
-    }).encode("utf-8")
+    # First read(10 * 1024 * 1024) gets the payload, second read(1) gets empty to pass the 10MB limit check
+    mock_response.read.side_effect = [
+        json.dumps({
+            "choices": [{"message": {"content": '{"actions": ["add_binding", "remove_rule"]}'}}]
+        }).encode("utf-8"),
+        b"",
+    ]
     mock_urlopen.return_value.__enter__.return_value = mock_response
 
     inner = OpenAICompatibleProposer(base_url="http://example", api_key="key", model="model")
