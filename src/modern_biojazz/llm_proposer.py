@@ -10,6 +10,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import List, Protocol
 
+from modern_biojazz.utils import validate_ip_is_external
+
 
 class ActionProposer(Protocol):
     def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
@@ -43,8 +45,7 @@ class OpenAICompatibleProposer:
             ip_obj = ipaddress.ip_address(ip)
         except ValueError as e:
             raise ValueError(f"Invalid IP address resolved {ip}: {e}")
-        if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_link_local or ip_obj.is_multicast:
-            raise ValueError(f"URL resolves to an internal or reserved IP address: {ip}")
+        validate_ip_is_external(ip_obj, ip)
 
     def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
         self._validate_url(self.base_url)

@@ -10,6 +10,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, Protocol
 
+from modern_biojazz.utils import validate_ip_is_external
+
 from .site_graph import ReactionNetwork
 
 
@@ -69,14 +71,7 @@ class CatalystHTTPClient:
         for _, _, _, _, sockaddr in addr_info:
             ip = sockaddr[0]
             ip_obj = ipaddress.ip_address(ip)
-            if (
-                ip_obj.is_private
-                or ip_obj.is_loopback
-                or ip_obj.is_link_local
-                or ip_obj.is_multicast
-                or ip_obj.is_reserved
-            ):
-                raise ValueError(f"URL resolves to internal/reserved IP address: {ip}")
+            validate_ip_is_external(ip_obj, ip)
 
     def simulate(
         self,
