@@ -33,6 +33,7 @@ class _LLMHandler(BaseHTTPRequestHandler):
 
 @patch("modern_biojazz.llm_proposer.OpenAICompatibleProposer._validate_url")
 def test_openai_compatible_proposer_with_safety_filter_e2e(mock_validate):
+    mock_validate.return_value = "127.0.0.1"
     server = HTTPServer(("127.0.0.1", 0), _LLMHandler)
     thread = threading.Thread(target=server.serve_forever)
     thread.start()

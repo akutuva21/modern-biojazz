@@ -8,7 +8,57 @@ import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from http.client import HTTPConnection, HTTPSConnection
 from typing import List, Protocol
+
+
+class _ValidatedHTTPSConnection(HTTPSConnection):
+    def __init__(self, host, port=None, safe_ip=None, **kwargs):
+        self._safe_ip = safe_ip
+        super().__init__(host, port, **kwargs)
+
+    def connect(self):
+        self.sock = socket.create_connection((self._safe_ip, self.port), self.timeout, self.source_address)
+        if self._tunnel_host:
+            self._tunnel()
+        if self._context:
+            server_hostname = self.host
+            self.sock = self._context.wrap_socket(self.sock, server_hostname=server_hostname)
+
+
+class _ValidatedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, safe_ip, **kwargs):
+        self._safe_ip = safe_ip
+        super().__init__(**kwargs)
+
+    def https_open(self, req):
+        def build(host, port=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, **kwargs):
+            return _ValidatedHTTPSConnection(host, port=port, timeout=timeout, safe_ip=self._safe_ip, **kwargs)
+
+        return self.do_open(build, req)
+
+
+class _ValidatedHTTPConnection(HTTPConnection):
+    def __init__(self, host, port=None, safe_ip=None, **kwargs):
+        self._safe_ip = safe_ip
+        super().__init__(host, port, **kwargs)
+
+    def connect(self):
+        self.sock = socket.create_connection((self._safe_ip, self.port), self.timeout, self.source_address)
+        if self._tunnel_host:
+            self._tunnel()
+
+
+class _ValidatedHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, safe_ip, **kwargs):
+        self._safe_ip = safe_ip
+        super().__init__(**kwargs)
+
+    def http_open(self, req):
+        def build(host, port=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, **kwargs):
+            return _ValidatedHTTPConnection(host, port=port, timeout=timeout, safe_ip=self._safe_ip, **kwargs)
+
+        return self.do_open(build, req)
 
 
 class ActionProposer(Protocol):
@@ -28,7 +78,7 @@ class OpenAICompatibleProposer:
     max_feedback_items: int = 8
     feedback_log: List[str] | None = None
 
-    def _validate_url(self, url: str) -> None:
+    def _validate_url(self, url: str) -> str:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":
             raise ValueError(f"Only HTTPS URLs are allowed, got: {parsed.scheme}")
@@ -36,18 +86,34 @@ class OpenAICompatibleProposer:
         if not hostname:
             raise ValueError("Invalid hostname in URL")
         try:
-            ip = socket.gethostbyname(hostname)
+            addr_info = socket.getaddrinfo(hostname, None)
         except socket.gaierror as e:
             raise ValueError(f"Could not resolve hostname {hostname}: {e}")
-        try:
-            ip_obj = ipaddress.ip_address(ip)
-        except ValueError as e:
-            raise ValueError(f"Invalid IP address resolved {ip}: {e}")
-        if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_link_local or ip_obj.is_multicast:
-            raise ValueError(f"URL resolves to an internal or reserved IP address: {ip}")
+
+        safe_ip = None
+        for _, _, _, _, sockaddr in addr_info:
+            ip = sockaddr[0]
+            if safe_ip is None:
+                safe_ip = ip
+            try:
+                ip_obj = ipaddress.ip_address(ip)
+            except ValueError as e:
+                raise ValueError(f"Invalid IP address resolved {ip}: {e}")
+            if (
+                ip_obj.is_loopback
+                or ip_obj.is_private
+                or ip_obj.is_link_local
+                or ip_obj.is_multicast
+                or ip_obj.is_reserved
+            ):
+                raise ValueError(f"URL resolves to an internal or reserved IP address: {ip}")
+        if safe_ip is None:
+            raise ValueError(f"Could not resolve any IP for hostname {hostname}")
+        return safe_ip
 
     def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
-        self._validate_url(self.base_url)
+        safe_ip = self._validate_url(self.base_url)
+
         recent_feedback = [] if self.feedback_log is None else self.feedback_log[-self.max_feedback_items :]
         prompt = {
             "role": "user",
@@ -70,6 +136,10 @@ class OpenAICompatibleProposer:
         }
         raw = None
         last_error: Exception | None = None
+        opener = urllib.request.build_opener(
+            _ValidatedHTTPSHandler(safe_ip=safe_ip),
+            _ValidatedHTTPHandler(safe_ip=safe_ip),
+        )
         for attempt in range(self.retry_count + 1):
             try:
                 req = urllib.request.Request(
@@ -81,7 +151,7 @@ class OpenAICompatibleProposer:
                     },
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
+                with opener.open(req, timeout=self.timeout_seconds) as response:
                     raw_data = response.read(10 * 1024 * 1024)
                     if response.read(1):
                         raise ValueError("Response payload exceeded 10MB limit")
@@ -145,7 +215,7 @@ class LLMDenoisingProposer:
     inner: OpenAICompatibleProposer
 
     def propose(self, model_code: str, action_names: List[str], budget: int) -> List[str]:
-        self.inner._validate_url(self.inner.base_url)
+        safe_ip = self.inner._validate_url(self.inner.base_url)
         prompt = {
             "role": "user",
             "content": (
@@ -171,6 +241,10 @@ class LLMDenoisingProposer:
 
         raw = None
         last_error: Exception | None = None
+        opener = urllib.request.build_opener(
+            _ValidatedHTTPSHandler(safe_ip=safe_ip),
+            _ValidatedHTTPHandler(safe_ip=safe_ip),
+        )
         for attempt in range(self.inner.retry_count + 1):
             try:
                 req = urllib.request.Request(
@@ -182,7 +256,7 @@ class LLMDenoisingProposer:
                     },
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=self.inner.timeout_seconds) as response:
+                with opener.open(req, timeout=self.inner.timeout_seconds) as response:
                     raw_data = response.read(10 * 1024 * 1024)
                     if response.read(1):
                         raise ValueError("Response payload exceeded 10MB limit")
