@@ -14,6 +14,22 @@ class MutationAction:
 class GraphMutator:
     """Graph-level mutation operators with lightweight biological constraints."""
 
+    _ACTION_MAPPINGS = [
+        ("add_site", "_action_random_add_site"),
+        ("add_kinase_cascade", "add_kinase_cascade"),
+        ("add_feedback_loop", "add_negative_feedback_loop"),
+        ("add_binding", "_action_random_bind"),
+        ("add_phosphorylation", "_action_random_phos"),
+        ("add_dephosphorylation", "_action_random_dephos"),
+        ("add_inhibition", "_action_random_inhibit"),
+        ("add_unbinding", "_action_random_unbind"),
+        ("remove_rule", "_action_random_remove_rule"),
+        ("modify_rate", "_action_random_modify_rate"),
+        ("remove_site", "_action_random_remove_site"),
+        ("duplicate_protein", "_action_random_duplicate"),
+        ("remove_protein", "_action_random_remove_protein"),
+    ]
+
     def __init__(self, rng: random.Random | None = None) -> None:
         self.rng = rng or random.Random()
 
@@ -447,17 +463,6 @@ class GraphMutator:
 
     def action_library(self, network: ReactionNetwork) -> Dict[str, MutationAction]:
         return {
-            "add_site": MutationAction("add_site", self._action_random_add_site),
-            "add_kinase_cascade": MutationAction("add_kinase_cascade", self.add_kinase_cascade),
-            "add_feedback_loop": MutationAction("add_feedback_loop", self.add_negative_feedback_loop),
-            "add_binding": MutationAction("add_binding", self._action_random_bind),
-            "add_phosphorylation": MutationAction("add_phosphorylation", self._action_random_phos),
-            "add_dephosphorylation": MutationAction("add_dephosphorylation", self._action_random_dephos),
-            "add_inhibition": MutationAction("add_inhibition", self._action_random_inhibit),
-            "add_unbinding": MutationAction("add_unbinding", self._action_random_unbind),
-            "remove_rule": MutationAction("remove_rule", self._action_random_remove_rule),
-            "modify_rate": MutationAction("modify_rate", self._action_random_modify_rate),
-            "remove_site": MutationAction("remove_site", self._action_random_remove_site),
-            "duplicate_protein": MutationAction("duplicate_protein", self._action_random_duplicate),
-            "remove_protein": MutationAction("remove_protein", self._action_random_remove_protein),
+            name: MutationAction(name, getattr(self, method_name))
+            for name, method_name in self._ACTION_MAPPINGS
         }
