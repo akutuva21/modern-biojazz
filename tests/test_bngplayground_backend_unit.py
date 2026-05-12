@@ -1,5 +1,7 @@
-import pytest
+import os
 from unittest.mock import MagicMock, patch
+
+import pytest
 from modern_biojazz.bngplayground_backend import BNGPlaygroundBackend, BNGLParsingError
 from modern_biojazz.site_graph import ReactionNetwork, Protein, Site, Rule
 
@@ -69,7 +71,7 @@ def test_security_bngplayground_path_validation_valid(mock_isdir):
     # os.path.isdir needs to return True for both the root dir and the packages/mcp-server subdir
     mock_isdir.return_value = True
     backend = BNGPlaygroundBackend(bngplayground_path="/valid/path")
-    assert "/valid/path" in backend.bngplayground_path
+    assert backend.bngplayground_path == os.path.abspath("/valid/path")
 
 @patch('os.path.isdir')
 def test_security_bngplayground_path_validation_invalid_repo(mock_isdir):

@@ -80,8 +80,8 @@ def test_evolution_with_indra_proposer_e2e(mock_urlopen):
 
 
 @patch("modern_biojazz.llm_proposer.OpenAICompatibleProposer._validate_url")
-@patch("urllib.request.urlopen")
-def test_evolution_with_llm_denoising_proposer_e2e(mock_urlopen, mock_validate):
+@patch("urllib.request.OpenerDirector.open")
+def test_evolution_with_llm_denoising_proposer_e2e(mock_open, mock_validate):
     """
     Robust E2E test verifying that LLMDenoisingProposer correctly passes LLM suggestions
     (like motifs) into the evolutionary pipeline.
@@ -91,14 +91,15 @@ def test_evolution_with_llm_denoising_proposer_e2e(mock_urlopen, mock_validate):
     # we return a side_effect list of mock responses so we don't return the exact
     # same mock object which might be consumed or exhausted.
 
-    def mock_read():
-        return json.dumps({
-            "choices": [{"message": {"content": '{"actions": ["add_kinase_cascade"]}'}}]
-        }).encode("utf-8")
+    mock_validate.return_value = "127.0.0.1"
+
+    response_body = json.dumps({
+        "choices": [{"message": {"content": '{"actions": ["add_kinase_cascade"]}'}}]
+    }).encode("utf-8")
 
     mock_response = MagicMock()
-    mock_response.read.side_effect = mock_read
-    mock_urlopen.return_value.__enter__.return_value = mock_response
+    mock_response.read.side_effect = [response_body, b""] * 10
+    mock_open.return_value.__enter__.return_value = mock_response
 
     sim_backend = LocalCatalystEngine()
     # A custom fitness evaluator that ensures mutated networks score better than seeds
@@ -279,20 +280,21 @@ def test_indra_proposer_phosphorylation_mek_erk_e2e(mock_urlopen):
 
 
 @patch("modern_biojazz.llm_proposer.OpenAICompatibleProposer._validate_url")
-@patch("urllib.request.urlopen")
-def test_evolution_llm_denoising_feedback_loop_p53_mdm2_e2e(mock_urlopen, mock_validate):
+@patch("urllib.request.OpenerDirector.open")
+def test_evolution_llm_denoising_feedback_loop_p53_mdm2_e2e(mock_open, mock_validate):
     """
     Test 7: Verify LLMDenoisingProposer accurately applies negative feedback
     motifs (e.g., mimicking p53/MDM2 regulation).
     """
-    def mock_read():
-        return json.dumps({
-            "choices": [{"message": {"content": '{"actions": ["add_feedback_loop"]}'}}]
-        }).encode("utf-8")
+    mock_validate.return_value = "127.0.0.1"
+
+    response_body = json.dumps({
+        "choices": [{"message": {"content": '{"actions": ["add_feedback_loop"]}'}}]
+    }).encode("utf-8")
 
     mock_response = MagicMock()
-    mock_response.read.side_effect = mock_read
-    mock_urlopen.return_value.__enter__.return_value = mock_response
+    mock_response.read.side_effect = [response_body, b""] * 10
+    mock_open.return_value.__enter__.return_value = mock_response
 
     sim_backend = LocalCatalystEngine()
     class MockFitness:
